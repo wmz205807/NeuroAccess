@@ -19,17 +19,71 @@ import { AppEventProvider } from "@/lib/app-events";
 // Metadata in English (SEO default); client-side language handled by LanguageProvider
 export const dynamic = "force-dynamic";
 
+/** 站点基准信息（只写可核实的事实：免费、开源 MIT、教育用途） */
+const SITE_URL = "https://neuroaccess.cloud";
+const SITE_TITLE = "NeuroAccess — Free EEG Analysis & EEG Literacy Platform";
+const SITE_DESCRIPTION =
+  "NeuroAccess is a free, open-source EEG literacy platform for exploring EEG data, learning brainwave concepts, and understanding signal analysis through interactive tools.";
+const OG_TITLE = "NeuroAccess — Understand EEG Without the Complexity";
+const OG_DESCRIPTION =
+  "Explore EEG data, brainwave concepts, simulations, and educational case studies through a free and open-source EEG literacy platform.";
+
+/**
+ * JSON-LD 结构化数据。只包含可验证信息：产品名、网址、免费、MIT 许可、公开仓库。
+ * 刻意不写用户数量、评分、医疗认证、奖项、机构合作、科研认证等无法验证的字段。
+ *
+ * 注意：必须用 <script type="application/ld+json"> 输出。此前的写法是把它塞进
+ * Metadata 的 other 字段，结果被输出成 <meta> 标签而不是 script —— 那是无效的，
+ * 搜索引擎不会解析这些数据。
+ */
+const STRUCTURED_DATA = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      name: "NeuroAccess",
+      url: `${SITE_URL}/`,
+      description: SITE_DESCRIPTION,
+      inLanguage: "en",
+      isAccessibleForFree: true,
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${SITE_URL}/#app`,
+      name: "NeuroAccess",
+      url: `${SITE_URL}/`,
+      description: SITE_DESCRIPTION,
+      applicationCategory: "EducationalApplication",
+      operatingSystem: "Web",
+      isAccessibleForFree: true,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      license: "https://opensource.org/licenses/MIT",
+      codeRepository: "https://github.com/wmz205807/NeuroAccess",
+    },
+  ],
+};
+
 export async function generateMetadata(): Promise<Metadata> {
-  const baseUrl = "https://neuroaccess.cloud";
+  const baseUrl = SITE_URL;
 
   return {
-    title: "NeuroAccess",
-    description: "Upload your EEG data and get AI-powered analysis reports. A free, non-profit educational platform for brainwave science.",
+    metadataBase: new URL(SITE_URL),
+    // 具体页面（如首页 src/app/page.tsx）可覆盖；未覆盖的页面走 default
+    title: { default: SITE_TITLE, template: "%s | NeuroAccess" },
+    description: SITE_DESCRIPTION,
     applicationName: "NeuroAccess",
-    alternates: { canonical: baseUrl },
+    // 这里刻意不再声明全站 canonical：旧写法让 /cases、/privacy、/terms 等页面
+    // 都声明 canonical 指向首页，等于告诉搜索引擎这些页面是首页的重复内容。
+    // 各页面应各自声明 canonical（首页已在 src/app/page.tsx 声明）。
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
+    },
     openGraph: {
-      title: "NeuroAccess",
-      description: "Upload your EEG data and get AI-powered analysis reports. A free, non-profit educational platform for brainwave science.",
+      title: OG_TITLE,
+      description: OG_DESCRIPTION,
       url: baseUrl,
       siteName: "NeuroAccess",
       images: [
@@ -44,9 +98,11 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
     },
     twitter: {
-      card: "summary_large_image",
-      title: "NeuroAccess",
-      description: "Upload your EEG data and get AI-powered analysis reports. A free, non-profit educational platform for brainwave science.",
+      // 现有分享图是 1:1 的方形 logo，用 summary 才不会被裁切；
+      // 若日后补一张 1.91:1（如 1200×630）的横幅图，再改回 summary_large_image。
+      card: "summary",
+      title: OG_TITLE,
+      description: OG_DESCRIPTION,
       images: [`${baseUrl}/neuroaccess-logo-512.png`],
     },
     icons: {
@@ -65,17 +121,6 @@ export async function generateMetadata(): Promise<Metadata> {
       capable: true,
       statusBarStyle: "default",
       title: "NeuroAccess",
-    },
-    other: {
-      "application/ld+json": JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "WebApplication",
-        name: "NeuroAccess",
-        url: baseUrl,
-        description: "Upload your EEG data and get AI-powered analysis reports. A free, non-profit educational platform for brainwave science.",
-        applicationCategory: "EducationalApplication",
-        operatingSystem: "Web",
-      }),
     },
   };
 }
@@ -128,6 +173,10 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{
           __html: `(function(){try{var t=localStorage.getItem("theme");if(t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}})()`
         }} />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+        />
         <link rel="shortcut icon" href="/favicon.ico?v=4" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=4" />

@@ -17,6 +17,10 @@ export interface FileJob {
   result?: any;
   eegData?: any;
   error?: string;
+  /** 后端上报的真实分析阶段（receiving/metadata/signal/waveform/bands/features/report/ai） */
+  stage?: string;
+  /** 上传字节进度 0–100（仅上传阶段真实可得，由 XHR upload.onprogress 提供） */
+  uploadPct?: number;
 }
 
 // ── safeJsonFetch ───────────────────────────────────────────────────
@@ -86,6 +90,61 @@ async function safeJsonFetch(url: string, timeoutMs: number, options: RequestIni
   }
 }
 
+// ── xhrAnalyze ──────────────────────────────────────────────────────
+// 用 XMLHttpRequest 发送 /api/analyze。
+// 为什么不继续用 fetch：fetch 拿不到「上传字节进度」，而上传几十 MB 的 EDF
+// 本身就是用户要等待的重要一段；XHR 的 upload.onprogress 能给出真实字节百分比。
+function xhrAnalyze(
+  url: string,
+  formData: FormData,
+  timeoutMs: number,
+  onUpload: (pct: number) => void,
+  t?: (key: string) => string,
+): Promise<any> {
+  const tx = t || ((key: string) => key);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("neuroaccess-token") : null;
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    } catch {}
+    xhr.timeout = timeoutMs;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        onUpload(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+      }
+    };
+    // 字节发完 → 服务器开始处理，UI 可从「上传」切到「分析」
+    xhr.upload.onload = () => onUpload(100);
+    xhr.onload = () => {
+      let data: any = null;
+      try {
+        data = JSON.parse(xhr.responseText || "{}");
+      } catch {
+        reject(new Error(`${tx("invalidJSON")}: ${(xhr.responseText || "").slice(0, 300)}`));
+        return;
+      }
+      if (xhr.status === 401) {
+        try {
+          localStorage.removeItem("neuroaccess-token");
+          sessionStorage.removeItem(getFilesCacheKey());
+          window.dispatchEvent(new CustomEvent("neuroaccess-token-expired"));
+        } catch {}
+        if (typeof window !== "undefined") window.location.href = "/login";
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || data?.success === false) {
+        reject(new Error(String(data?.error || data?.detail || `HTTP ${xhr.status}`)));
+        return;
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.ontimeout = () => reject(new Error(tx("requestTimedOut")));
+    xhr.send(formData);
+  });
+}
+
 // ── Context ──────────────────────────────────────────────────────────
 interface AnalysisContextValue {
   files: FileJob[];
@@ -100,6 +159,8 @@ interface AnalysisContextValue {
   startAnalysis: () => void;
   pauseAnalysis: () => void;
   resumeAnalysis: () => void;
+  /** 游客体验：分析内置示例 EEG（无需登录，结果不落库） */
+  analyzeSample: (sampleId: string, displayName: string) => Promise<void>;
 }
 
 const AnalysisContext = createContext<AnalysisContextValue | null>(null);
@@ -124,6 +185,7 @@ function serializeFiles(files: FileJob[]): string {
       id: f.id, name: f.name, size: f.size, status: f.status,
       result: f.result || null, eegData: f.eegData || null,
       error: f.error || null,
+      stage: f.stage || null, uploadPct: typeof f.uploadPct === "number" ? f.uploadPct : null,
     })),
   };
   try { return JSON.stringify(meta); } catch { return '{"savedAt":0,"items":[]}'; }
@@ -144,6 +206,8 @@ function deserializeFiles(json: string): FileJob[] {
       file: new File([], m.name || "unknown.edf"),
       result: m.result || null, eegData: m.eegData || null,
       error: m.error || null,
+      stage: m.stage || undefined,
+      uploadPct: typeof m.uploadPct === "number" ? m.uploadPct : undefined,
     }));
   } catch { return []; }
 }
@@ -295,24 +359,59 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
             );
           });
 
+          // ── 真实阶段轮询（每 600ms 读一次后端上报的阶段）──────
+          // 后端在 /api/analyze 的各真实阶段边界写入进度表；这里并发读取，
+          // 让 UI 显示「现在在做什么」，而不是一根与真实进展无关的进度条。
+          let stageTimer: ReturnType<typeof setInterval> | null = null;
+
           try {
             // ── 阶段2：调用 /analyze（快速基础分析）─────────────
             setFiles((prev) => {
               if (runIdRef.current !== myRunId) return prev;
               return prev.map((f) =>
-                f.id === item.id ? { ...f, status: "computing", error: undefined } : f
+                f.id === item.id
+                  ? { ...f, status: "computing", error: undefined, stage: undefined, uploadPct: 0 }
+                  : f
               );
             });
+
+            const pollStage = async () => {
+              try {
+                const r = await fetch(
+                  `${API_BASE}/api/analysis/progress/${encodeURIComponent(item.id)}`,
+                );
+                const d = await r.json();
+                if (d?.success && d.stage && runIdRef.current === myRunId) {
+                  setFiles((prev) =>
+                    prev.map((f) => (f.id === item.id ? { ...f, stage: d.stage } : f)),
+                  );
+                }
+              } catch {
+                /* 轮询失败不影响分析本身 */
+              }
+            };
+            stageTimer = setInterval(pollStage, 600);
+            pollStage();
 
             const formData = new FormData();
             formData.append("file", item.file);
             formData.append("language", lang);
             formData.append("report_id", item.id);
+            // 复用同一个 id 作为进度键：后端据此写入真实阶段
+            formData.append("progress_id", item.id);
 
-            const data = await safeJsonFetch(`${API_BASE}/api/analyze`, ANALYZE_TIMEOUT, {
-              method: "POST",
-              body: formData,
-            }, t);
+            const data = await xhrAnalyze(
+              `${API_BASE}/api/analyze`,
+              formData,
+              ANALYZE_TIMEOUT,
+              (pct) => {
+                if (runIdRef.current !== myRunId) return;
+                setFiles((prev) =>
+                  prev.map((f) => (f.id === item.id ? { ...f, uploadPct: pct } : f)),
+                );
+              },
+              t,
+            );
 
             if (!data.success) throw new Error(data.error || t("analysisFailed"));
 
@@ -496,6 +595,9 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
               );
             });
             addNotification(`${t("analysisFailed")}: ${item.name}`, "error");
+          } finally {
+            // 请求结束（成功或失败）都要停掉阶段轮询，避免空转
+            if (stageTimer) clearInterval(stageTimer);
           }
         }
       } catch (unexpectedErr) {
@@ -512,6 +614,110 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     startAnalysisRef.current = startAnalysis;
   }, [startAnalysis]);
+
+  // ── 游客体验：分析内置示例 EEG ──────────────────────────────────
+  // 走 /api/try-sample：后端读取固定示例文件，返回与 /api/analyze 同构的结果，
+  // 但不写数据库（游客报告只存在于本次会话）。AI 解释仍由后端后台线程生成，
+  // 前端轮询 /api/analysis/explanations/{id} 补齐。
+  const analyzeSample = useCallback(async (sampleId: string, displayName: string) => {
+    const jobId = `sample-${sampleId}`;
+    const job: FileJob = {
+      id: jobId,
+      file: new File([], displayName || sampleId),
+      name: displayName || sampleId,
+      size: 0,
+      status: "computing",
+    };
+    // 同一样例重复点击时替换旧条目，避免堆叠
+    setFiles((prev) => [...prev.filter((f) => f.id !== jobId), job]);
+    setExpandId(jobId);
+    setRunning(true);
+
+    // 轮询后端真实阶段（示例文件在服务器本地，没有上传阶段，从 receiving 开始）
+    let stageTimer: ReturnType<typeof setInterval> | null = null;
+    try {
+      const token = (typeof window !== "undefined" && localStorage.getItem("neuroaccess-token")) || "";
+
+      const pollStage = async () => {
+        try {
+          const r = await fetch(
+            `${API_BASE}/api/analysis/progress/${encodeURIComponent(jobId)}`,
+          );
+          const d = await r.json();
+          if (d?.success && d.stage) {
+            setFiles((prev) => prev.map((f) => (f.id === jobId ? { ...f, stage: d.stage } : f)));
+          }
+        } catch {
+          /* 轮询失败不影响分析本身 */
+        }
+      };
+      stageTimer = setInterval(pollStage, 600);
+      pollStage();
+
+      const res = await fetch(`${API_BASE}/api/try-sample`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ sample: sampleId, language: lang, progress_id: jobId }),
+      });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.error || "sample analysis failed");
+
+      const analysis = data.analysis || {};
+      const wp = analysis.waveform_preview || {};
+      const eegData = {
+        success: true,
+        file_name: data.file_name,
+        channel_names: analysis.channel_names || [],
+        sampling_rate: analysis.sampling_rate,
+        duration_seconds: analysis.recording_duration_seconds ?? analysis.duration_seconds,
+        times: wp.times || [],
+        channels: wp.channels || {},
+        total_channels: (analysis.channel_names || []).length,
+        total_samples: (wp.times || []).length,
+      };
+
+      setFiles((prev) => prev.map((f) =>
+        f.id === jobId ? { ...f, status: "analysisReady", result: analysis, eegData } : f
+      ));
+
+      // 轮询 AI 解释（最多 ~3 分钟），就绪后标记 completed
+      const aid = analysis.analysis_id;
+      if (aid) {
+        for (let attempt = 0; attempt < 60; attempt++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          try {
+            const pr = await fetch(`${API_BASE}/api/analysis/explanations/${aid}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            const pd = await pr.json();
+            if (pd?.success && pd.explanations) {
+              setFiles((prev) => prev.map((f) =>
+                f.id === jobId && f.result
+                  ? { ...f, status: "completed", result: { ...f.result, explanations: pd.explanations } }
+                  : f
+              ));
+              break;
+            }
+            if (pd && pd.success === false) break;
+          } catch { /* 网络抖动继续重试 */ }
+        }
+      }
+      // 模板解释已随首次响应返回，即使 AI 未就绪也视为可用
+      setFiles((prev) => prev.map((f) =>
+        f.id === jobId && f.status === "analysisReady" ? { ...f, status: "completed" } : f
+      ));
+    } catch (e: any) {
+      setFiles((prev) => prev.map((f) =>
+        f.id === jobId ? { ...f, status: "failed", error: e?.message || String(e) } : f
+      ));
+    } finally {
+      if (stageTimer) clearInterval(stageTimer);
+      setRunning(false);
+    }
+  }, [lang, setExpandId]);
 
   // Listen for token-expired event (dispatched by safeJsonFetch on 401)
   useEffect(() => {
@@ -536,7 +742,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
   return (
     <AnalysisContext.Provider
-      value={{ files, running, paused, expandId, setExpandId, handleFileSelect, removeFile, clearAll, startAnalysis, pauseAnalysis, resumeAnalysis, retryFile }}
+      value={{ files, running, paused, expandId, setExpandId, handleFileSelect, removeFile, clearAll, startAnalysis, pauseAnalysis, resumeAnalysis, retryFile, analyzeSample }}
     >
       {children}
     </AnalysisContext.Provider>

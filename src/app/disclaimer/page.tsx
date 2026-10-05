@@ -39,13 +39,6 @@ export default function DisclaimerPage() {
           </div>
         </div>
 
-        {/* Important notice */}
-        <div className="mb-8 p-4 rounded-xl bg-red-500/5 border border-red-500/10">
-          <p className="font-medium text-red-500 dark:text-red-400 text-sm">
-            {t("disclaimerImportant")}
-          </p>
-        </div>
-
         {/* Sections */}
         <div className="space-y-8">
           {content.map((section: any, i: number) => (

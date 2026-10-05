@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// 未登录时可访问的路径：仅登录/注册页、法律条款页、静态资源、API
+// 未登录时可访问的「目录/前缀」路径：法律条款页、教育内容、静态资源、API
+// 注意：这里每一项都按 pathname === p 或 pathname.startsWith(p + "/") 匹配，
+// 所以不要放 "/"（会放行整站）。首页单独放在 publicExact 里精确匹配。
 const publicPaths = [
   "/login", "/register",
   // 法律条款页（注册时需要查看，保持公开）
   "/privacy", "/terms", "/disclaimer",
+  // 游客可访问的教育内容：无需注册即可了解与体验 NeuroAccess 的核心功能
+  // （Knowledge / Case Studies / Simulator）
+  "/guide", "/cases", "/eeg-simulator",
   // 静态资源与 API
   "/api/",
   "/_next/",
@@ -18,6 +23,10 @@ const publicPaths = [
   "/robots.txt", "/sitemap.xml",
   "/downloads/",
 ];
+
+// 精确匹配的公开路径（首页：游客可直接打开，登录后同一个路径渲染工作台）
+const publicExact = ["/"];
+
 
 const SECRET = process.env.JWT_SECRET_KEY || "";
 
@@ -75,7 +84,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get("neuroaccess-token")?.value;
 
-  const isPublic = publicPaths.some((p) => {
+  const isPublic = publicExact.includes(pathname) || publicPaths.some((p) => {
     if (p.endsWith("/")) return pathname.startsWith(p); // 目录前缀（/api/、/_next/、/downloads/）
     return pathname === p || pathname.startsWith(p + "/"); // 精确路径，防 /termsxxx 误放行
   });

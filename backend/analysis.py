@@ -1258,7 +1258,17 @@ def detect_special_waveforms(data_uv: Optional[np.ndarray], ch_names: List[str],
 # 主分析入口
 # =====================================================================
 
-def analyze_edf(file_path: str, lang: str = "zh") -> Dict[str, Any]:
+def _pc(cb, stage: str):
+    """安全地向外报告当前分析阶段。回调异常绝不允许影响分析主流程。"""
+    if cb is None:
+        return
+    try:
+        cb(stage)
+    except Exception:
+        pass
+
+
+def analyze_edf(file_path: str, lang: str = "zh", progress_cb=None) -> Dict[str, Any]:
     """快速分析 EDF 文件（v2.0 — 只做基础分析，不含 AI/Picture/PDF）
     
     流程：
@@ -1268,6 +1278,11 @@ def analyze_edf(file_path: str, lang: str = "zh") -> Dict[str, Any]:
     4. 快速波形预览（8s窗口）
     5. 组装结果返回
     
+    progress_cb(stage: str) — 可选。在各真实阶段边界回调，用于前端展示
+    分步进度（app.py 的 /api/analyze 会把 stage 写入进度表供轮询）。
+    可能的值：metadata / signal / waveform / bands / features / assembling。
+    算法本身不因该参数而改变。
+
     不在本函数中：Ollama AI解释、PDF生成、PNG波形图
     """
     # ── 格式验证 ──────────────────────────────────────
@@ -1284,6 +1299,7 @@ def analyze_edf(file_path: str, lang: str = "zh") -> Dict[str, Any]:
         )
     
     # ── 1. 元数据（preload=False，瞬间返回）─────────────
+    _pc(progress_cb, "metadata")
     meta = fast_load_metadata(file_path)
     filename = os.path.basename(file_path)
     minutes = int(meta["duration_seconds"] // 60)
@@ -1301,6 +1317,7 @@ def analyze_edf(file_path: str, lang: str = "zh") -> Dict[str, Any]:
     }
     
     # ── 2. 快速信号质量和频段分析（只用前60s数据）─────
+    _pc(progress_cb, "signal")
     seg_data_uv = None
     seg_ch_names = None
     seg_sfreq = None
@@ -1325,11 +1342,13 @@ def analyze_edf(file_path: str, lang: str = "zh") -> Dict[str, Any]:
         literacy = quick_literacy_scores(quality, overview)
     
     # ── 3. 波形预览（按文件完整时长显示，下采样到 ~1200 点）────
+    _pc(progress_cb, "waveform")
     # 用户要求：文件时长有多久就显示多久。直接读取完整时长，
     # 输出经 1200 点下采样，波形体积恒定；长文件仅读取耗时略增。
     waveform_preview = fast_preview_window(file_path, duration_sec=meta["duration_seconds"], max_channels=MAX_PREVIEW_CHANNELS)
     
     # ── 4. 频段波形（从已加载数据提取，避免重复读取文件）────
+    _pc(progress_cb, "bands")
     # 用前10s数据做频段滤波
     bw_n = min(int(10.0 * seg_sfreq), seg_data_uv.shape[1]) if seg_data_uv is not None else 0
     if bw_n > 100 and seg_sfreq > 0:
@@ -1340,9 +1359,11 @@ def analyze_edf(file_path: str, lang: str = "zh") -> Dict[str, Any]:
         band_waveforms = quick_band_waveforms(file_path, duration_seconds=10.0)
     
     # ── 4.5 特殊波形检测（尖波/纺锤/慢波/K复合波/mu/SMR/三相波/周期放电）────
+    _pc(progress_cb, "features")
     special_waveforms = detect_special_waveforms(seg_data_uv, seg_ch_names, seg_sfreq)
     
     # ── 5. 组合结果 ─────────────────────────────────────
+    _pc(progress_cb, "assembling")
     def _safe(v):
         if isinstance(v, (np.integer, np.int32, np.int64)):
             return int(v)

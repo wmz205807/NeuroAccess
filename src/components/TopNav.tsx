@@ -25,6 +25,10 @@ const mobileMenuItems = [
   { key: "eegSimulator", href: "/eeg-simulator", icon: Activity },
 ];
 
+// 游客可浏览的菜单条目（过滤掉需要账户的页面）
+const menuItemsFor = (loggedIn: boolean) =>
+  loggedIn ? mobileMenuItems : mobileMenuItems.filter((i) => i.href !== "/reports");
+
 // 根据 lang 直接返回翻译（SSR 期间 useLang() 返回默认值 en，不能用 t()）
 const getLoginText = (lang: string): string => {
   const map: Record<string, string> = {
@@ -66,19 +70,17 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
 
   return (
     <>
-    <header className="h-14 bg-[var(--color-surface)]/80 backdrop-blur-xl border-b border-[var(--color-border)] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40">
+    <header className="h-14 bg-[var(--color-surface)]/80 border-b border-[var(--color-border)] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40">
       {/* Left: hamburger + logo */}
       <div className="flex items-center gap-3">
-        {/* 移动端菜单按钮 — lg以上隐藏 */}
-        {user && (
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--color-bg)] transition-colors text-[var(--color-text-secondary)]"
-            aria-label="Open menu"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-        )}
+        {/* 移动端菜单按钮 — lg以上隐藏；游客同样可用（游客也需要导航与语言/主题入口） */}
+        <button
+          onClick={() => setMobileMenuOpen(true)}
+          className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--color-bg)] transition-colors text-[var(--color-text-secondary)]"
+          aria-label="Open menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
 
         <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
           <span className="text-sm font-semibold text-[var(--color-text)]">NeuroAccess</span>
@@ -97,7 +99,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
       </div>
 
       {/* Right: user avatar */}
-      <div>
+      <div className="flex">
         {user ? (
           <button
             onClick={() => router.push("/account")}
@@ -117,7 +119,10 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
               e.preventDefault();
               window.location.href = "/login";
             }}
-            className="text-xs text-[var(--color-primary)] hover:opacity-80 transition-opacity cursor-pointer"
+            // 触控区：文字本身只有约 24×14px，低于 WCAG 2.5.5 的 44×44 建议值。
+            // 用「最小尺寸 + 对称内边距 + 负外边距抵消」扩大命中区，
+            // 负边距正好抵消内边距 ⇒ 布局占位与原文字宽高一致，视觉位置零位移。
+            className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 -mx-2.5 text-xs text-[var(--color-primary)] hover:opacity-80 transition-opacity cursor-pointer"
           >
             {getLoginText(lang)}
           </a>
@@ -145,7 +150,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
           </div>
           <nav className="flex-1 overflow-y-auto p-4">
             <ul className="space-y-1">
-              {mobileMenuItems.map((item) => {
+              {menuItemsFor(!!user).map((item) => {
                 const isActive = pathname === item.href;
                 const Icon = item.icon;
                 return (

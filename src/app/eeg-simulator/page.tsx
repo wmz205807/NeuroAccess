@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore
 import nextDynamic from "next/dynamic";
 import { useLang } from "@/lib/language-context";
 import { useAuth } from "@/lib/auth-context";
-import { Info, Loader2, AlertTriangle, CheckCircle2, FileText } from "lucide-react";
+import { Info, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { EEGGenerationManager as gen } from "@/lib/eeg-generation-manager";
 
@@ -186,7 +186,9 @@ async function persistPresets(list: SavedPreset[]) {
 
 export default function EegSimulatorPage() {
   const { t } = useLang();
-  const { user, loading } = useAuth();
+  // 游客（未登录）也可使用模拟器：不要求注册即可生成 / 观察 EEG 信号。
+  // 仅「保存预设到账户」需要登录，相关调用本身已具备 token 判空保护。
+  const { loading } = useAuth();
 
   // ── 生成状态（从 EEGGenerationManager 订阅，独立于组件生命周期）────
   const genState = useSyncExternalStore(
@@ -395,25 +397,12 @@ export default function EegSimulatorPage() {
     );
   };
 
-  // ── 未登录：先转圈校验会话，再提示登录 ──────────────────────────
+  // ── 会话校验中：转圈（游客与登录用户都会短暂经过此状态）──────────
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-bg)]">
         <Loader2 className="h-8 w-8 animate-spin text-[var(--color-primary)]" />
       </div>
-    );
-  }
-  if (!user) {
-    return (
-      <motion.div
-        className="flex min-h-screen items-center justify-center bg-[var(--color-bg)] text-[var(--color-text)]"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
-      >
-        <div className="text-center">
-          <FileText className="mx-auto mb-4 h-12 w-12 text-[var(--color-text-secondary)]/50" />
-          <p className="text-lg font-medium text-[var(--color-text)]">{t("pleaseLogin")}</p>
-        </div>
-      </motion.div>
     );
   }
 

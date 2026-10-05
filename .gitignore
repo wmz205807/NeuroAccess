@@ -89,3 +89,6 @@ RELEASE_NOTES.md
 public/debug-waveform.html
 public/eeg-waveform-test.html
 public/turnstile-test.html
+
+# 历史重写遗留临时目录（git filter-branch）
+.git-rewrite/

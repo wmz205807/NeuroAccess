@@ -81,7 +81,12 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
       try { data = await resp.json(); } catch { data = { detail: tf("sendCodeFailed", "Failed to send verification code") }; }
       if (resp.ok && data.success) {
         setCountdown(60);
-        setCodeSentMsg(true);
+        // email_sent 才是「邮件是否真的发出」的真源：SMTP 未配置/发送失败时后端仍返回
+        // success=true（验证码已生成入库），但绝不能提示「验证码已发送到你的邮箱」。
+        // 字段缺失视为已发送，兼容旧后端。
+        const sentOk = !data.email_sent || data.email_sent === "sent";
+        setCodeSentMsg(sentOk);
+        if (!sentOk) setError(tf("sendCodeFailed", "Failed to send verification code"));
         if (countdownRef.current) clearInterval(countdownRef.current);
         countdownRef.current = setInterval(() => {
           setCountdown(prev => { if (prev <= 1) { clearInterval(countdownRef.current!); countdownRef.current = null; return 0; } return prev - 1; });

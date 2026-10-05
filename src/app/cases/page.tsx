@@ -15,9 +15,11 @@ import {
   Search,
   Filter,
   ArrowUpDown,
+  Database,
 } from "lucide-react";
 import { useLang } from "@/lib/language-context";
 import type { Lang } from "@/lib/translations";
+import AnalyzeCasePanel from "@/components/AnalyzeCasePanel";
 
 
 /* 案例数据类型（多语言） */
@@ -41,569 +43,751 @@ interface CaseStudy {
   research_explanation: LangString;
   limitations: LangStringArray;
   what_this_data_cannot_tell: LangStringArray;
-  source?: LangString;  // 数据来源说明（教学示例/模拟/脱敏）
+  /** 来源说明（教学示意 / 模拟 / 真实公开数据集） */
+  source?: LangString;
+  /**
+   * 数据类型：simulated（教学模拟）/ real（真实记录）/ public（公开数据集）/ unknown（未核实）。
+   * 缺省按 "unknown" 保守渲染，不猜测。
+   *
+   * 现状：本案例库的每个案例都绑定一段真实公开数据集的 EEG 片段，
+   *   并逐条给出 dataset / citation / recordingType；dataKind 为 "real"，
+   *   sourceType 为 "public"。新增案例时请同样提供可核实的来源，禁止编造。
+   */
+  dataKind?: DataKind;
+  /**
+   * 来源类型：reference（教育参考，本案例库现状）/ literature（有明确文献依据）/ 
+   *          simulated（附带模拟记录）/ public（绑定公开数据集）/ unknown（未核实）。
+   * 缺省按 reference 渲染——不猜测、不编造来源。
+   *
+   * 现状：全部案例均为 "public" —— 片段来自 CHB-MIT（PhysioNet，ODC-By 1.0）
+   *   或 OpenNeuro ds004504（CC0），案例页附带对应片段文件，可直接分析。
+   *   新增案例若来源无法核实，请按 "unknown" 保守渲染，不要猜测。
+   */
+  sourceType?: SourceType;
+  /** 数据集名称（英文专名，通常不翻译）；缺省时界面显示 "Source information currently unavailable." */
+  dataset?: LangString;
+  /** 文献引用（作者 / 年份 / 期刊或 DOI）；缺省时界面显示 "Source information currently unavailable." */
+  citation?: LangString;
+  /** 记录类型描述 */
+  recordingType?: LangString;
+  /** 数据集内的记录号（如 chb01_03 / sub-001）；列表态与详情都用它锚定到具体片段 */
+  recordRef?: string;
+  /** 数据集许可（英文专名，不翻译）；ODC-By 等许可要求署名，必须展示 */
+  license?: string;
 }
+
+/**
+ * 数据类型，用于「Data Status」一行：
+ *   illustrative —— 只有文字示意、不附带任何 EEG 记录文件（本案例库已不使用）；
+ *   simulated —— 附带模拟生成的 EEG 记录；real —— 真实记录；public —— 公开数据集；unknown —— 未核实。
+ */
+type DataKind = "illustrative" | "simulated" | "real" | "public" | "unknown";
+
+/** 来源类型（Source Type 一行） */
+type SourceType = "reference" | "literature" | "simulated" | "public" | "unknown";
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 「数据来源与真实性」统一文案（自包含七语言，避免污染共享 translations.ts）
+ * 事实基准：本案例库为真实公开数据集的 EEG 片段（CHB-MIT / OpenNeuro ds004504），
+ *           用于练习 EEG 波形与模式的识别；
+ *           NeuroAccess 展示 EEG 特征，不据用户上传的 EEG 判断其患有何种疾病。
+ * ──────────────────────────────────────────────────────────────────────────── */
+type SrcL = "zh" | "en" | "es" | "fr" | "de" | "ja" | "ko";
+
+const SRC_L: Record<SrcL, {
+  heading: string;
+  labelSource: string;
+  labelDataset: string;
+  labelCitation: string;
+  labelLicense: string;
+  labelRecordingType: string;
+  labelDataKind: string;
+  kindSimulated: string;
+  kindReal: string;
+  kindPublic: string;
+  kindUnknown: string;
+  simulated: string;
+  unavailable: string;
+  pending: string;
+  limitationsTitle: string;
+  cannotTellTitle: string;
+  labelSourceType: string;
+  labelDataStatus: string;
+  stReference: string;
+  stLiterature: string;
+  stSimulated: string;
+  stPublic: string;
+  stUnknown: string;
+  dsIllustrative: string;
+  dsSimulated: string;
+  dsReal: string;
+  dsPublic: string;
+  dsUnknown: string;
+  rtIllustrative: string;
+}> = {
+  zh: {
+    heading: "数据来源与真实性",
+    labelSource: "来源",
+    labelDataset: "数据集",
+    labelCitation: "文献引用",
+    labelLicense: "许可",
+    labelRecordingType: "记录类型",
+    labelDataKind: "数据类型",
+    kindSimulated: "模拟数据（教育演示）",
+    kindReal: "真实记录",
+    kindPublic: "公开数据集",
+    kindUnknown: "未核实",
+    simulated: "模拟 EEG，用于教育演示。",
+    unavailable: "来源信息暂不可用。",
+    pending: "来源核实中。",
+    limitationsTitle: "本案例的局限",
+    cannotTellTitle: "这份数据不能告诉你什么",
+    labelSourceType: "来源类型",
+    labelDataStatus: "数据状态",
+    stReference: "教育参考（无可核实的具体来源）",
+    stLiterature: "基于文献整理的教学示例",
+    stSimulated: "模拟 EEG",
+    stPublic: "公开 EEG 数据集",
+    stUnknown: "未核实",
+    dsIllustrative: "教育参考（示意内容）",
+    dsSimulated: "教育演示用模拟数据",
+    dsReal: "真实记录",
+    dsPublic: "公开数据集",
+    dsUnknown: "未核实",
+    rtIllustrative: "文字示意——本案例不附带 EEG 记录文件。",
+  },
+  en: {
+    heading: "Data source & authenticity",
+    labelSource: "Source",
+    labelDataset: "Dataset",
+    labelCitation: "Citation",
+    labelLicense: "License",
+    labelRecordingType: "Recording type",
+    labelDataKind: "Data type",
+    kindSimulated: "Simulated (educational)",
+    kindReal: "Real recording",
+    kindPublic: "Public dataset",
+    kindUnknown: "Unverified",
+    simulated: "Simulated EEG for educational demonstration.",
+    unavailable: "Source information currently unavailable.",
+    pending: "Source verification pending.",
+    limitationsTitle: "Limitations of this case",
+    cannotTellTitle: "What this data cannot tell you",
+    labelSourceType: "Source Type",
+    labelDataStatus: "Data Status",
+    stReference: "Educational reference (no verifiable source)",
+    stLiterature: "Literature-based educational example",
+    stSimulated: "Simulated EEG",
+    stPublic: "Public EEG Dataset",
+    stUnknown: "Unverified",
+    dsIllustrative: "Educational reference",
+    dsSimulated: "Simulated for educational demonstration",
+    dsReal: "Real recording",
+    dsPublic: "Public dataset",
+    dsUnknown: "Unverified",
+    rtIllustrative: "Illustrative description — no EEG recording file is bundled with this case.",
+  },
+  es: {
+    heading: "Origen y autenticidad de los datos",
+    labelSource: "Fuente",
+    labelDataset: "Conjunto de datos",
+    labelCitation: "Cita",
+    labelLicense: "Licencia",
+    labelRecordingType: "Tipo de registro",
+    labelDataKind: "Tipo de datos",
+    kindSimulated: "Simulado (educativo)",
+    kindReal: "Registro real",
+    kindPublic: "Conjunto de datos público",
+    kindUnknown: "Sin verificar",
+    simulated: "EEG simulado con fines de demostración educativa.",
+    unavailable: "Información de origen no disponible actualmente.",
+    pending: "Verificación de la fuente pendiente.",
+    limitationsTitle: "Limitaciones de este caso",
+    cannotTellTitle: "Lo que estos datos no pueden decirte",
+    labelSourceType: "Tipo de fuente",
+    labelDataStatus: "Estado de los datos",
+    stReference: "Referencia educativa (sin fuente verificable)",
+    stLiterature: "Ejemplo educativo basado en literatura",
+    stSimulated: "EEG simulado",
+    stPublic: "Conjunto de datos EEG público",
+    stUnknown: "Sin verificar",
+    dsIllustrative: "Referencia educativa",
+    dsSimulated: "Simulado con fines de demostración educativa",
+    dsReal: "Registro real",
+    dsPublic: "Conjunto de datos público",
+    dsUnknown: "Sin verificar",
+    rtIllustrative: "Descripción ilustrativa: este caso no incluye ningún archivo de registro EEG.",
+  },
+  fr: {
+    heading: "Origine et authenticité des données",
+    labelSource: "Source",
+    labelDataset: "Jeu de données",
+    labelCitation: "Citation",
+    labelLicense: "Licence",
+    labelRecordingType: "Type d'enregistrement",
+    labelDataKind: "Type de données",
+    kindSimulated: "Simulé (éducatif)",
+    kindReal: "Enregistrement réel",
+    kindPublic: "Jeu de données public",
+    kindUnknown: "Non vérifié",
+    simulated: "EEG simulé à des fins de démonstration éducative.",
+    unavailable: "Informations sur la source actuellement indisponibles.",
+    pending: "Vérification de la source en attente.",
+    limitationsTitle: "Limites de ce cas",
+    cannotTellTitle: "Ce que ces données ne peuvent pas vous dire",
+    labelSourceType: "Type de source",
+    labelDataStatus: "Statut des données",
+    stReference: "Référence éducative (aucune source vérifiable)",
+    stLiterature: "Exemple éducatif issu de la littérature",
+    stSimulated: "EEG simulé",
+    stPublic: "Jeu de données EEG public",
+    stUnknown: "Non vérifié",
+    dsIllustrative: "Référence éducative",
+    dsSimulated: "Simulé à des fins de démonstration éducative",
+    dsReal: "Enregistrement réel",
+    dsPublic: "Jeu de données public",
+    dsUnknown: "Non vérifié",
+    rtIllustrative: "Description illustrative — ce cas n'inclut aucun fichier d'enregistrement EEG.",
+  },
+  de: {
+    heading: "Datenquelle & Authentizität",
+    labelSource: "Quelle",
+    labelDataset: "Datensatz",
+    labelCitation: "Zitat",
+    labelLicense: "Lizenz",
+    labelRecordingType: "Aufzeichnungstyp",
+    labelDataKind: "Datentyp",
+    kindSimulated: "Simuliert (edukativ)",
+    kindReal: "Echte Aufzeichnung",
+    kindPublic: "Öffentlicher Datensatz",
+    kindUnknown: "Nicht verifiziert",
+    simulated: "Simuliertes EEG zu didaktischen Demonstrationszwecken.",
+    unavailable: "Quellenangabe derzeit nicht verfügbar.",
+    pending: "Quellenprüfung ausstehend.",
+    limitationsTitle: "Grenzen dieses Falls",
+    cannotTellTitle: "Was diese Daten nicht aussagen können",
+    labelSourceType: "Quellentyp",
+    labelDataStatus: "Datenstatus",
+    stReference: "Didaktische Referenz (keine überprüfbare Quelle)",
+    stLiterature: "Literaturbasiertes didaktisches Beispiel",
+    stSimulated: "Simuliertes EEG",
+    stPublic: "Öffentlicher EEG-Datensatz",
+    stUnknown: "Nicht verifiziert",
+    dsIllustrative: "Didaktische Referenz",
+    dsSimulated: "Simuliert zu didaktischen Demonstrationszwecken",
+    dsReal: "Echte Aufzeichnung",
+    dsPublic: "Öffentlicher Datensatz",
+    dsUnknown: "Nicht verifiziert",
+    rtIllustrative: "Illustrative Beschreibung – diesem Fall liegt keine EEG-Aufzeichnungsdatei bei.",
+  },
+  ja: {
+    heading: "データの出典と真正性",
+    labelSource: "出典",
+    labelDataset: "データセット",
+    labelCitation: "引用",
+    labelLicense: "ライセンス",
+    labelRecordingType: "記録タイプ",
+    labelDataKind: "データ種別",
+    kindSimulated: "シミュレーション（教育用）",
+    kindReal: "実記録",
+    kindPublic: "公開データセット",
+    kindUnknown: "未検証",
+    simulated: "教育デモンストレーション用のシミュレーションEEGです。",
+    unavailable: "出典情報は現在利用できません。",
+    pending: "出典を確認中です。",
+    limitationsTitle: "このケースの限界",
+    cannotTellTitle: "このデータから分からないこと",
+    labelSourceType: "出典タイプ",
+    labelDataStatus: "データ状態",
+    stReference: "教育用リファレンス（検証可能な出典なし）",
+    stLiterature: "文献に基づく教育用例",
+    stSimulated: "シミュレーションEEG",
+    stPublic: "公開EEGデータセット",
+    stUnknown: "未検証",
+    dsIllustrative: "教育用リファレンス",
+    dsSimulated: "教育デモンストレーション用のシミュレーションデータ",
+    dsReal: "実記録",
+    dsPublic: "公開データセット",
+    dsUnknown: "未検証",
+    rtIllustrative: "文章による例示——このケースにEEG記録ファイルは添付されていません。",
+  },
+  ko: {
+    heading: "데이터 출처 및 진위",
+    labelSource: "출처",
+    labelDataset: "데이터셋",
+    labelCitation: "인용",
+    labelLicense: "라이선스",
+    labelRecordingType: "기록 유형",
+    labelDataKind: "데이터 유형",
+    kindSimulated: "시뮬레이션(교육용)",
+    kindReal: "실제 기록",
+    kindPublic: "공개 데이터셋",
+    kindUnknown: "미검증",
+    simulated: "교육 시연용 시뮬레이션 EEG입니다.",
+    unavailable: "출처 정보를 현재 사용할 수 없습니다.",
+    pending: "출처 확인 중입니다.",
+    limitationsTitle: "이 사례의 한계",
+    cannotTellTitle: "이 데이터가 알려주지 못하는 것",
+    labelSourceType: "출처 유형",
+    labelDataStatus: "데이터 상태",
+    stReference: "교육용 참고(검증 가능한 출처 없음)",
+    stLiterature: "문헌 기반 교육용 예시",
+    stSimulated: "시뮬레이션 EEG",
+    stPublic: "공개 EEG 데이터셋",
+    stUnknown: "미검증",
+    dsIllustrative: "교육용 참고",
+    dsSimulated: "교육 시연용 시뮬레이션 데이터",
+    dsReal: "실제 기록",
+    dsPublic: "공개 데이터셋",
+    dsUnknown: "미검증",
+    rtIllustrative: "설명용 예시——이 사례에는 EEG 기록 파일이 포함되어 있지 않습니다.",
+  },
+};
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 案例库：全部基于真实公开 EEG 数据集
+ * ----------------------------------------------------------------------------
+ * 每个案例都对应一段真实患者/被试的 EEG 记录，来源可逐条核实：
+ *   · CHB-MIT Scalp EEG Database v1.0.0（PhysioNet，ODC-By 1.0）
+ *     —— 局灶性癫痫患者的连续头皮 EEG，发作时间由数据集官方标注
+ *   · OpenNeuro ds004504（CC0）
+ *     —— 阿尔茨海默病 / 额颞叶痴呆 / 健康对照的闭眼静息态 EEG
+ *
+ * 每个片段只做了「时间窗裁剪 + 标准 EDF 重写」，未滤波、未合成、未改动信号内容。
+ * 页面上展示的信号质量与频段功率，是用 NeuroAccess 自身的分析流程在该片段上
+ * 实测得到的数值（不是估计值，也不是教科书上的示例值）。
+ *
+ * 边界：这里描述的是信号特征，不是诊断。EEG 特征不能单独用于诊断任何疾病，
+ *      也不能用来推断任何一个具体的人的健康状况。
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** 生成「来源」说明（七语言模板；dataset 为英文专名，不翻译） */
+const mkSource = (dataset: string, record: string): LangString => ({
+  zh: `真实记录：本案例使用的 EEG 片段来自公开数据集 ${dataset}（记录 ${record}），按该数据集的开放许可使用。片段只做了时间窗裁剪与标准 EDF 重写，未改动信号内容。`,
+  en: `Real recording: the EEG segment used in this case comes from the public dataset ${dataset} (record ${record}), used under that dataset's open license. The segment was only time-windowed and re-written in standard EDF; the signal itself was not modified.`,
+  es: `Registro real: el segmento de EEG usado en este caso proviene del conjunto de datos público ${dataset} (registro ${record}), utilizado bajo su licencia abierta. El segmento solo se recortó en el tiempo y se reescribió en EDF estándar; la señal no se modificó.`,
+  fr: `Enregistrement réel : le segment EEG utilisé dans ce cas provient du jeu de données public ${dataset} (enregistrement ${record}), utilisé sous sa licence ouverte. Le segment a seulement été découpé dans le temps et réécrit au format EDF standard ; le signal n'a pas été modifié.`,
+  de: `Echte Aufzeichnung: Das in diesem Fall verwendete EEG-Segment stammt aus dem öffentlichen Datensatz ${dataset} (Aufzeichnung ${record}) und wird unter dessen offener Lizenz verwendet. Das Segment wurde nur zeitlich zugeschnitten und im Standard-EDF neu geschrieben; das Signal selbst wurde nicht verändert.`,
+  ja: `実際の記録：このケースで使用したEEGセグメントは公開データセット ${dataset}（記録 ${record}）からのもので、当該データセットのオープンライセンスに基づき使用しています。セグメントは時間窓で切り出し、標準EDFに書き直しただけであり、信号自体は改変していません。`,
+  ko: `실제 기록: 이 사례에 사용된 EEG 세그먼트는 공개 데이터셋 ${dataset}(기록 ${record})에서 가져왔으며, 해당 데이터셋의 오픈 라이선스에 따라 사용합니다. 세그먼트는 시간 창으로 잘라 표준 EDF로 다시 쓴 것일 뿐, 신호 자체는 변경하지 않았습니다.`,
+});
+
+/** 生成「记录类型」说明（七语言模板） */
+const mkRec = (
+  ch: number, hz: number, sec: number, montageZh: string, montageEn: string,
+): LangString => ({
+  zh: `真实记录：${ch} 通道 · ${hz} Hz · ${sec} 秒 · ${montageZh}。本案例附带该片段文件，可直接分析。`,
+  en: `Real recording: ${ch} channels · ${hz} Hz · ${sec} s · ${montageEn}. The segment file is bundled with this case and can be analysed directly.`,
+  es: `Registro real: ${ch} canales · ${hz} Hz · ${sec} s · ${montageEn}. El archivo del segmento se incluye con este caso y puede analizarse directamente.`,
+  fr: `Enregistrement réel : ${ch} canaux · ${hz} Hz · ${sec} s · ${montageEn}. Le fichier du segment accompagne ce cas et peut être analysé directement.`,
+  de: `Echte Aufzeichnung: ${ch} Kanäle · ${hz} Hz · ${sec} s · ${montageEn}. Die Segmentdatei liegt diesem Fall bei und kann direkt analysiert werden.`,
+  ja: `実際の記録：${ch}チャンネル · ${hz} Hz · ${sec}秒 · ${montageEn}。このセグメントファイルは本ケースに添付されており、直接分析できます。`,
+  ko: `실제 기록: ${ch}채널 · ${hz} Hz · ${sec}초 · ${montageEn}. 이 세그먼트 파일은 본 사례에 포함되어 있으며 직접 분석할 수 있습니다.`,
+});
+
+const CHB_DATASET = "CHB-MIT Scalp EEG Database v1.0.0 (PhysioNet)";
+const DS_DATASET = "OpenNeuro ds004504 (Alzheimer's disease, FTD and healthy subjects)";
+const CHB_CITE = "Guttag, J. (2010). CHB-MIT Scalp EEG Database (version 1.0.0). PhysioNet. doi:10.13026/C2K01R";
+const DS_CITE = "Miltiadous, A. et al. (2023). Data, 8(6), 95. doi:10.3390/data8060095 (dataset doi:10.18112/openneuro.ds004504.v1.0.9)";
+const CHB_LIC = "Open Data Commons Attribution License v1.0 (ODC-By 1.0)";
+const DS_LIC = "CC0 1.0 (public domain dedication)";
+const CHB_MONTAGE_ZH = "双极导联，国际 10-20 系统";
+const CHB_MONTAGE_EN = "bipolar montage, international 10-20 system";
+const DS_MONTAGE_ZH = "单极导联，国际 10-20 系统，闭眼静息态";
+const DS_MONTAGE_EN = "referential montage, international 10-20 system, eyes-closed resting state";
 
 const cases: CaseStudy[] = [
   {
     id: "c1",
     title: {
-      zh: "全面性癫痫发作期 EEG（Generalized Seizure）",
-      en: "Generalized Seizure EEG (Ictal)",
+      zh: "癫痫发作期 EEG（真实患者 · 病例 1）",
+      en: "Seizure EEG, Ictal (Real Patient · Case 1)",
     },
     categoryKey: "patterns",
     difficultyKey: "advanced",
     description: {
-      zh: "该案例展示全面性（全身性）癫痫发作期的典型 EEG 特征：双侧弥漫性、同步的高幅棘波-慢波复合放电（约 3 Hz），发作期间背景节律被广泛抑制。",
-      en: "This case shows the typical ictal EEG of a generalized (whole-brain) seizure: bilateral, diffuse, synchronous high-amplitude spike-and-slow-wave discharges (~3 Hz) with suppression of background rhythms.",
+      zh: "真实患者记录：11 岁女性局灶性癫痫患者（CHB-MIT 数据集 chb01 病例）连续监测中的 55 秒片段，覆盖数据集官方标注的一次癫痫发作（起始 2996 秒、结束 3036 秒，持续 40 秒）。发作段以高幅慢活动为主导。",
+      en: "A real patient recording: a 55-second segment from continuous monitoring of an 11-year-old female with focal epilepsy (case chb01 in the CHB-MIT database). It spans a seizure annotated by the dataset itself (onset 2996 s, offset 3036 s — 40 seconds). High-amplitude slow activity dominates during the seizure.",
     },
     details: {
-      zh: "1. 发作期出现双侧同步的 3 Hz 棘波-慢波复合放电，波幅高、节律规则\n2. 放电期间正常背景节律（α 等）消失\n3. 发作终止后常见短暂的后发作性慢波\n\n此类放电模式在全身性强直-阵挛发作的教学描述中最具代表性，也是失神发作的经典模式。",
-      en: "1. Bilateral synchronous 3 Hz spike-and-wave discharges with high amplitude and regular rhythm\n2. Background rhythms (e.g., alpha) disappear during the discharge\n3. Brief post-ictal slowing commonly follows the seizure\n\nThis discharge pattern is the classic teaching example for generalized tonic-clonic and absence seizures.",
+      zh: "1. 片段共 55 秒，发作从第 10 秒开始、持续约 40 秒\n2. 实测频段相对功率：δ 59.3%、θ 25.9%、α 13.0%、β 1.9% —— 慢波（δ+θ）合计约 85%\n3. 与同一患者的发作间期记录（本页病例 4）对比：β 由 7.4% 降至 1.9%，快波被明显抑制\n4. 信号质量评分 83.6 / 100\n\n以上数值均由 NeuroAccess 的分析流程在该片段上实测得到。",
+      en: "1. The segment is 55 s; the seizure starts at ~10 s and lasts about 40 s\n2. Measured relative band power: δ 59.3%, θ 25.9%, α 13.0%, β 1.9% — slow activity (δ+θ) totals ~85%\n3. Compared with the same patient's interictal record (case 4 on this page): β falls from 7.4% to 1.9%, i.e. fast activity is clearly suppressed\n4. Signal quality score 83.6 / 100\n\nAll figures were measured on this segment by NeuroAccess's own analysis pipeline.",
     },
-    signal_quality: 68,
-    learning_readability_score: 74,
+    signal_quality: 83.59,
+    learning_readability_score: 88.6,
     beginner_explanation: {
-      zh: "这份脑电记录里出现了许多「尖尖的」异常放电波，它们是大范围脑区异常同步放电的表现，医学上称为棘波。在教材中，这类波形常与癫痫发作（尤其是全身性发作）放在一起讲解。需要说明：脑电上的棘波不能单独确诊癫痫，必须结合临床发作表现。",
-      en: "This EEG contains many sharp abnormal discharges — signs of widespread, abnormally synchronized brain activity, known as spikes. Textbooks associate this pattern with seizures, especially generalized ones. Important: spikes alone cannot diagnose epilepsy; clinical seizures are required.",
+      zh: "这段脑电来自一位真实的癫痫患者，记录的正是发作期间的大脑电活动。你会看到波形整体变得又慢又大（慢波占优势），而平时存在的快速小波动几乎消失。需要特别强调：脑电只能反映电活动特征，不能单独诊断癫痫，也不能据此判断某个人是否患病。",
+      en: "This EEG comes from a real patient and captures brain activity during a seizure. The waveform becomes slow and large (slow activity dominates), while the small fast ripples normally present almost disappear. Important: EEG reflects electrical features only — it cannot diagnose epilepsy on its own, and it says nothing about whether any particular person has a condition.",
     },
     student_explanation: {
-      zh: "发作期可见双侧弥漫性 3 Hz 棘慢波复合放电（GSW），随发作进展频率可减慢、波幅增高；发作后呈弥漫性慢波。发作间期背景可正常或轻度异常。此模式是全身性癫痫（如失神、强直-阵挛发作）的经典 EEG 表现。",
-      en: "The ictal record shows bilateral diffuse 3 Hz spike-and-wave discharges (GSW); frequency may slow and amplitude increase as the seizure evolves. Post-ictal diffuse slowing follows. Interictal background may be normal or mildly abnormal. This is the classic EEG pattern of generalized epilepsy (absence, tonic-clonic).",
+      zh: "发作期频谱以 δ/θ 慢活动为绝对主导（合计约 85%），β 快波降至 2% 以下，符合「发作期背景节律被广泛抑制、代之以高幅慢活动」的描述。与同一病例的发作间期片段对比，可见清晰的高频抑制模式 —— 这是本案例库中最容易定量展示的一对对照。",
+      en: "The ictal spectrum is dominated by δ/θ slow activity (~85% combined), with β falling below 2%, consistent with widespread suppression of background rhythms during a seizure and their replacement by high-amplitude slow activity. Compared with the same patient's interictal segment, a clear high-frequency suppression pattern emerges — the most easily quantified contrast in this case library.",
     },
     research_explanation: {
-      zh: "发作期：双侧同步 3 Hz 棘慢波放电，额区-中央区优势，波幅递增；发作后 θ/δ 慢波持续数十秒。注意与正常睡眠中良性瞬时性棘波（BETS）和药物性三相波鉴别。EEG 对癫痫的定位、分型与药物疗效评估具有重要价值，但确诊需结合临床发作史。",
-      en: "Ictal: bilateral synchronous 3 Hz spike-and-wave discharges, fronto-central maximum, crescendo amplitude; followed by post-ictal theta/delta slowing for tens of seconds. Distinguish from benign epileptiform transients of sleep (BETS) and drug-induced triphasic waves. EEG supports seizure classification and treatment monitoring, but diagnosis requires clinical seizure history.",
+      zh: "片段取自 CHB-MIT chb01 病例（局灶性癫痫，11 岁女性），发作时间采用数据集官方标注（2996–3036 s）。该 55 s 窗内相对频段功率为 δ 59.3 / θ 25.9 / α 13.0 / β 1.9（%），主频 1.67 Hz。记录为 23 通道双极导联（10-20 系统）、256 Hz。局限：无视频-EEG 同步，单次记录不能确定发作起源区，也不能替代完整的临床电生理评估。",
+      en: "The segment comes from CHB-MIT case chb01 (focal epilepsy, 11-year-old female); seizure timing follows the dataset's own annotation (2996–3036 s). Over this 55 s window the relative band power is δ 59.3 / θ 25.9 / α 13.0 / β 1.9 (%), with a dominant frequency of 1.67 Hz. The recording is 23-channel bipolar montage (10-20 system) at 256 Hz. Limitations: no video-EEG correlation; a single recording cannot localise the seizure onset zone and does not replace a full clinical electrophysiological assessment.",
     },
     limitations: {
-      zh: ["模拟案例无法展示真实患者完整的临床背景", "单次记录可能无法捕捉到发作的完整演变过程", "需视频-EEG 同步监测才能确认发作的临床相关性"],
-      en: ["Simulated case without full clinical history", "A single recording may not capture the full ictal evolution", "Video-EEG monitoring is needed to confirm clinical correlation of discharges"],
+      zh: ["片段只有 55 秒，不能代表该患者整体的脑电特征", "单次记录无法确定发作起源区（需视频-EEG 同步与完整临床资料）", "本案例不提供任何诊断信息，也不代表其他癫痫患者的表现"],
+      en: ["A 55-second segment cannot represent this patient's overall EEG characteristics", "A single recording cannot localise the seizure onset zone (video-EEG and full clinical data are required)", "This case provides no diagnostic information and does not represent other patients with epilepsy"],
     },
     what_this_data_cannot_tell: {
-      zh: ["是否真的患有癫痫（需临床诊断）", "发作的具体诱因", "患者发作时的意识状态"],
-      en: ["Whether the person truly has epilepsy (clinical diagnosis required)", "The specific trigger of the seizure", "The patient's level of consciousness during the event"],
+      zh: ["这个人是否真的患有癫痫（需临床诊断）", "发作从大脑的哪个区域开始", "任何与本例相似的人的健康状况"],
+      en: ["Whether this person truly has epilepsy (clinical diagnosis required)", "Which brain region the seizure arises from", "The health status of anyone who resembles this case"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["seizure", "epilepsy", "spike", "generalized", "ictal"],
-    readTime: "5 分钟",
+    recordRef: "chb01_03",
+    source: mkSource(CHB_DATASET, "chb01_03"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: CHB_DATASET, en: CHB_DATASET },
+    citation: { zh: CHB_CITE, en: CHB_CITE },
+    license: CHB_LIC,
+    recordingType: mkRec(23, 256, 55, CHB_MONTAGE_ZH, CHB_MONTAGE_EN),
+    tags: ["seizure", "epilepsy", "ictal", "chb-mit", "real-data"],
+    readTime: "6 分钟",
   },
   {
     id: "c2",
     title: {
-      zh: "局灶性癫痫发作间期 EEG（Focal Epilepsy Interictal）",
-      en: "Focal Epilepsy EEG (Interictal)",
+      zh: "癫痫发作期 EEG（真实患者 · 病例 2）",
+      en: "Seizure EEG, Ictal (Real Patient · Case 2)",
     },
     categoryKey: "patterns",
-    difficultyKey: "intermediate",
+    difficultyKey: "advanced",
     description: {
-      zh: "该案例展示局灶性癫痫发作间期的典型 EEG 特征：颞区反复出现局灶性棘波/尖波，背景节律基本保留。",
-      en: "This case shows the typical interictal EEG of focal epilepsy: recurrent focal spikes/sharp waves over the temporal region with preserved background rhythms.",
+      zh: "同一患者（CHB-MIT chb01 病例）另一次发作的 42 秒片段，覆盖数据集标注的发作区间（起始 1467 秒、结束 1494 秒，持续 27 秒）。这一次慢波占比比病例 1 更高。",
+      en: "A 42-second segment covering another seizure in the same patient (CHB-MIT case chb01), spanning the dataset-annotated interval (onset 1467 s, offset 1494 s — 27 seconds). Here slow activity accounts for an even larger share than in case 1.",
     },
     details: {
-      zh: "1. 左颞区（F7、T3）可见反复出现的局灶性棘波/尖波\n2. 背景 α 节律存在，但左侧可轻度减弱\n3. 未见全面性放电\n\n局灶性放电提示痫样活动源于特定脑区，颞叶是最常见的起源部位之一（教学描述）。",
-      en: "1. Recurrent focal spikes/sharp waves over the left temporal region (F7, T3)\n2. Background alpha rhythm preserved, slightly reduced on the left\n3. No generalized discharges\n\nFocal discharges suggest epileptiform activity arising from a specific brain region; the temporal lobe is one of the most common origins.",
+      zh: "1. 片段共 42 秒，发作从第 10 秒开始、持续约 27 秒\n2. 实测频段相对功率：δ 85.6%、θ 12.0%、α 1.9%、β 0.4%\n3. 与病例 1 相比，本次发作的 α 与 β 成分进一步下降（α 12.9% → 1.9%）\n4. 信号质量评分 80.9 / 100\n\n同一位患者两次发作的频谱并不相同 —— 这一点本身就是真实数据的特征：发作的电生理表现会随发作而变化。",
+      en: "1. The segment is 42 s; the seizure starts at ~10 s and lasts about 27 s\n2. Measured relative band power: δ 85.6%, θ 12.0%, α 1.9%, β 0.4%\n3. Compared with case 1, both α and β are further reduced (α 12.9% → 1.9%)\n4. Signal quality score 80.9 / 100\n\nThe two seizures in the same patient do not have identical spectra — that variability is itself a feature of real data: the electrophysiological expression of a seizure varies from event to event.",
     },
-    signal_quality: 75,
-    learning_readability_score: 78,
+    signal_quality: 80.87,
+    learning_readability_score: 85.4,
     beginner_explanation: {
-      zh: "这份记录在左侧耳朵附近的区域反复出现「尖尖的」异常波，而其他大部分地方看起来比较正常。这种只出现在局部的异常放电，在教材里常与大脑某个区域源性的癫痫（局灶性癫痫）放在一起讲，最常见的位置是颞叶。",
-      en: "This record shows repeated sharp abnormal waves near the left temple, while most other areas look fairly normal. Localized discharges like these are linked in textbooks to epilepsy arising from one brain region (focal epilepsy), most often the temporal lobe.",
+      zh: "这是同一个患者的另一次发作。波形同样以慢而大的活动为主，而且比第一次更「慢」——几乎看不到快速波动。把两段放在一起看，你会发现：即使是同一个人，每次发作的脑电也不完全一样。",
+      en: "This is another seizure in the same patient. The waveform is again dominated by slow, large activity — and it is even slower than the first one, with almost no fast ripples visible. Looking at both together shows that even within one person, each seizure looks somewhat different.",
     },
     student_explanation: {
-      zh: "发作间期痫样放电（IED）：颞区（F7/T3）局灶性尖波，偶发或反复出现，波幅约 100 μV，背景节律基本正常。局灶性 IED 是局灶性癫痫（尤其颞叶癫痫）的标志性 EEG 发现，定位价值高，但需结合临床症状。",
-      en: "Interictal epileptiform discharges (IEDs): focal sharp waves over the temporal region (F7/T3), sporadic or recurrent, ~100 µV, with preserved background. Focal IEDs are a hallmark finding in focal epilepsy (especially temporal lobe epilepsy) and have high localizing value.",
+      zh: "本段 δ 占比达 85.6%，α/β 合计不足 2.5%，属于发作期慢波化的极端表现。与病例 1（δ 59.2%）对照可以直观看到：同为发作期，频谱构成差异可以很大。这提示在自动化发作检测中，单靠某个固定频段阈值并不稳健。",
+      en: "δ accounts for 85.6% here, with α+β below 2.5% — an extreme degree of ictal slowing. Contrasting with case 1 (δ 59.2%) shows that spectral composition during seizures can vary widely, which is a caution for automated seizure detection that relies on fixed band thresholds.",
     },
     research_explanation: {
-      zh: "记录显示颞区局灶性尖波（F7、T3），单次或成簇出现，后接慢波；背景 α 节律枕区优势，左侧稍减弱。局灶性 IED 与颞叶癫痫高度相关；定位需结合视频 EEG 与 MRI。约 1-3% 无癫痫人群亦可出现良性棘波，解读需谨慎。",
-      en: "Focal sharp waves over the temporal region (F7, T3), single or in runs, followed by slow waves; occipital-dominant alpha slightly reduced on the left. Focal IEDs strongly correlate with temporal lobe epilepsy; localization requires video-EEG and MRI. Benign spikes occur in 1-3% of non-epileptic people, so interpretation must be cautious.",
+      zh: "同患者（chb01）第二次发作片段，官方标注 1467–1494 s。实测相对频段功率 δ 85.6 / θ 12.0 / α 1.9 / β 0.4（%）。与 chb01_03 相比慢波占比由 85% 升至 97.6%（δ+θ），提示发作不同阶段的频谱演化可能差别明显。局限同病例 1：单通道组、无同步视频、无发作起源定位信息。",
+      en: "Second seizure segment from the same patient (chb01), annotated at 1467–1494 s. Measured relative band power: δ 85.6 / θ 12.0 / α 1.9 / β 0.4 (%). Versus chb01_03, slow activity rises from ~85% to 97.6% (δ+θ), suggesting marked spectral evolution across seizures. Same limitations as case 1: single montage, no synchronised video, no onset-localisation information.",
     },
     limitations: {
-      zh: ["发作间期放电可能间歇出现，短时记录易漏检", "模拟案例不包含真实患者病史与影像资料", "棘波可见于少数无癫痫人群，不能单独诊断"],
-      en: ["Interictal discharges may be intermittent and missed in short recordings", "Simulated case without real history or imaging", "Spikes occur in a minority of people without epilepsy and cannot diagnose alone"],
+      zh: ["42 秒片段不足以刻画完整的发作演变过程", "无法判断这次发作与病例 1 的发作在临床上是否属于同一类型", "本案例不提供任何诊断信息"],
+      en: ["A 42-second segment is too short to capture the full evolution of the seizure", "Cannot determine whether this and case 1 are clinically the same seizure type", "This case provides no diagnostic information"],
     },
     what_this_data_cannot_tell: {
-      zh: ["是否真的患有癫痫", "放电起源于哪一侧的哪个具体脑区（需综合定位）", "下次发作的时间"],
-      en: ["Whether the person truly has epilepsy", "The exact region of origin (requires combined localization)", "When the next seizure will occur"],
+      zh: ["发作的类型与起源部位", "发作的诱发因素", "这个人当前的临床状况"],
+      en: ["The seizure type or its site of origin", "What triggered the seizure", "This person's current clinical status"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["epilepsy", "focal", "temporalLobe", "interictal", "spike"],
+    recordRef: "chb01_04",
+    source: mkSource(CHB_DATASET, "chb01_04"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: CHB_DATASET, en: CHB_DATASET },
+    citation: { zh: CHB_CITE, en: CHB_CITE },
+    license: CHB_LIC,
+    recordingType: mkRec(23, 256, 42, CHB_MONTAGE_ZH, CHB_MONTAGE_EN),
+    tags: ["seizure", "epilepsy", "ictal", "chb-mit", "real-data"],
     readTime: "5 分钟",
   },
   {
     id: "c3",
     title: {
-      zh: "阿尔茨海默病早期 EEG（Early Alzheimer's Disease）",
-      en: "Early Alzheimer's Disease EEG",
+      zh: "癫痫发作期 EEG（真实患者 · 病例 3）",
+      en: "Seizure EEG, Ictal (Real Patient · Case 3)",
     },
-    categoryKey: "clinical",
-    difficultyKey: "intermediate",
+    categoryKey: "patterns",
+    difficultyKey: "advanced",
     description: {
-      zh: "该案例展示早期阿尔茨海默病（AD）的典型 EEG 特征：α 峰值频率减慢、弥漫性 θ 活动增多、后部优势节律对睁闭眼反应减弱。",
-      en: "This case shows the typical EEG features of early Alzheimer's disease (AD): slowed alpha peak frequency, increased diffuse theta activity, and reduced reactivity of the posterior dominant rhythm.",
+      zh: "同一患者的第三次发作片段（CHB-MIT chb01 病例，官方标注起始 1732 秒、结束 1772 秒，持续 40 秒）。在本次记录中，δ+θ 慢活动合计占 98.2%，是三个发作片段中最「慢」的一段。",
+      en: "A third seizure segment from the same patient (CHB-MIT case chb01, dataset-annotated onset 1732 s, offset 1772 s — 40 seconds). In this record δ+θ slow activity accounts for 98.2% combined — the slowest of the three seizure segments.",
     },
     details: {
-      zh: "1. 枕区 α 峰值频率减慢至约 8 Hz（健康成人多在 9-11 Hz）\n2. 弥漫性 θ 波（4-8 Hz）活动明显增多\n3. 后部优势节律（PDR）在睁眼时衰减减弱\n\n上述改变是认知功能下降相关疾病（尤其是 AD）最常描述的 EEG 表现，属于弥漫性而非局灶性改变。",
-      en: "1. Occipital alpha peak slowed to ~8 Hz (healthy adults usually 9-11 Hz)\n2. Diffuse theta (4-8 Hz) activity markedly increased\n3. Reduced attenuation of the posterior dominant rhythm (PDR) on eye opening\n\nThese changes are the most commonly described EEG findings in cognitive decline (especially AD) and are diffuse rather than focal.",
+      zh: "1. 片段共 55 秒，发作从第 10 秒开始、持续约 40 秒\n2. 实测频段相对功率：δ 86.8%、θ 11.4%、α 1.6%、β 0.3%\n3. δ+θ 合计 98.2%，是三个发作片段中最「慢」的一段\n4. 信号质量评分 81.7 / 100\n\n三个发作片段（病例 1–3）来自同一位患者，可以放在一起观察发作间频谱差异。",
+      en: "1. The segment is 55 s; the seizure starts at ~10 s and lasts about 40 s\n2. Measured relative band power: δ 86.8%, θ 11.4%, α 1.6%, β 0.3%\n3. δ+θ total 98.2% — the slowest of the three seizure segments\n4. Signal quality score 81.7 / 100\n\nThe three seizure segments (cases 1–3) come from the same patient and can be compared side by side for inter-seizure spectral variation.",
     },
-    signal_quality: 82,
-    learning_readability_score: 70,
+    signal_quality: 81.69,
+    learning_readability_score: 84.2,
     beginner_explanation: {
-      zh: "这份记录的脑波比正常放松时「慢了一档」，后脑勺的放松波（α 波）变弱、反应变差。教材里常提到：脑波整体变慢、α 波减弱，可能与记忆力、思考能力下降相关的情况（比如阿尔茨海默病早期）有关，但脑电只能作为辅助参考。",
-      en: "The brainwaves here are slower than normal relaxed ones, and the occipital alpha (relaxation) waves are weaker and less reactive. Textbooks note that overall slowing with weaker alpha may relate to conditions involving declining memory and thinking (e.g., early Alzheimer's disease), but EEG is only an auxiliary reference.",
+      zh: "这一段几乎全部是慢波。你可以把病例 1、2、3 放在一起看：同一个人的三次发作，慢波占比一次比一次高。真实数据往往就是这样有变化，而不是每次都长得一模一样。",
+      en: "This segment is almost entirely slow activity. Compare cases 1, 2 and 3: across three seizures in one person, the slow-wave share increases each time. Real data often varies like this rather than looking identical every time.",
     },
     student_explanation: {
-      zh: "早期 AD 的 EEG 特征：α 峰值频率减慢（<8.5 Hz）、θ 功率增加、PDR 反应性下降。这些改变反映皮层-皮层下网络功能减退，对认知障碍的辅助评估有价值，但需结合神经心理测验与影像学，不能单独确诊。",
-      en: "Early AD EEG features: slowed alpha peak (<8.5 Hz), increased theta power, reduced PDR reactivity. These reflect cortico-subcortical network dysfunction and support cognitive assessment, but must be combined with neuropsychological tests and imaging; they cannot diagnose alone.",
+      zh: "本段 δ 86.8% + θ 11.4% = 98.2%，α/β 合计仅 1.9%，属于深度慢波化。三例发作片段的 δ+θ 依次为 85.2% / 97.6% / 98.2%，可作为「发作期频谱并非固定模板」的直观教学材料。",
+      en: "Here δ 86.8% + θ 11.4% = 98.2%, leaving only 1.9% for α/β — profound slowing. Across the three seizure segments δ+θ is 85.2% / 97.6% / 98.2%, a vivid illustration that the ictal spectrum is not a fixed template.",
     },
     research_explanation: {
-      zh: "静息态 EEG：枕区 α 峰值约 8 Hz（减慢），θ 相对功率升高，睁眼时 PDR 衰减不充分。文献中 α 减慢与 MMSE 等认知评分呈负相关，且随病程进展慢波进一步增多；EEG 作为无创、廉价的辅助生物标志物，可用于纵向随访，但不能单独诊断 AD。",
-      en: "Resting EEG: occipital alpha peak ~8 Hz (slowed), elevated relative theta power, incomplete PDR attenuation on eye opening. Literature shows alpha slowing correlates negatively with cognitive scores (e.g., MMSE) and worsens with disease progression. EEG is a non-invasive, low-cost auxiliary biomarker for longitudinal follow-up, but cannot diagnose AD alone.",
+      zh: "chb01 第三次发作片段，官方标注 1732–1772 s。实测 δ 86.8 / θ 11.4 / α 1.6 / β 0.3（%）。三例发作的 δ+θ 占比分别为 85.2 / 97.6 / 98.2（%），提示发作间频谱构成存在实质差异；在教学与算法评测中，不宜用单一频谱模板代表「发作期」。局限：同病例 1。",
+      en: "Third seizure segment from chb01, annotated 1732–1772 s. Measured δ 86.8 / θ 11.4 / α 1.6 / β 0.3 (%). Across the three seizures δ+θ is 85.2 / 97.6 / 98.2 (%), indicating substantive inter-seizure spectral variation; a single spectral template should not be used to represent 'the ictal state' in teaching or algorithm benchmarking. Limitations as in case 1.",
     },
     limitations: {
-      zh: ["α 减慢也可见于正常衰老、用药或睡眠不足", "模拟案例不含认知量表评分等临床信息", "不能区分 AD 与其他类型痴呆"],
-      en: ["Alpha slowing also occurs in normal aging, medication, or sleep deprivation", "Simulated case without cognitive test scores or clinical data", "Cannot distinguish AD from other dementias"],
+      zh: ["55 秒片段只覆盖发作的一个时间窗", "三个片段来自同一位患者，不能代表癫痫群体的多样性", "本案例不提供任何诊断信息"],
+      en: ["The 55-second segment covers only one window of the seizure", "All three segments come from a single patient and do not represent the diversity of epilepsy", "This case provides no diagnostic information"],
     },
     what_this_data_cannot_tell: {
-      zh: ["是否患有阿尔茨海默病（需临床诊断）", "认知功能下降的具体原因", "疾病的当前严重程度"],
-      en: ["Whether the person has Alzheimer's disease (clinical diagnosis required)", "The specific cause of cognitive decline", "Current disease severity"],
+      zh: ["这个人的癫痫类型", "发作对认知或意识的影响", "任何其他人的情况"],
+      en: ["This person's epilepsy type", "The effect of the seizure on cognition or awareness", "Anything about anyone else"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["alzheimer", "dementia", "slowing", "alpha", "clinical"],
+    recordRef: "chb01_15",
+    source: mkSource(CHB_DATASET, "chb01_15"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: CHB_DATASET, en: CHB_DATASET },
+    citation: { zh: CHB_CITE, en: CHB_CITE },
+    license: CHB_LIC,
+    recordingType: mkRec(23, 256, 55, CHB_MONTAGE_ZH, CHB_MONTAGE_EN),
+    tags: ["seizure", "epilepsy", "ictal", "chb-mit", "real-data"],
     readTime: "5 分钟",
   },
   {
     id: "c4",
     title: {
-      zh: "代谢性脑病 EEG（Metabolic Encephalopathy）",
-      en: "Metabolic Encephalopathy EEG",
+      zh: "癫痫发作间期 EEG（无发作基线）",
+      en: "Interictal EEG (Seizure-Free Baseline)",
     },
-    categoryKey: "clinical",
+    categoryKey: "patterns",
     difficultyKey: "intermediate",
     description: {
-      zh: "该案例展示代谢性脑病的典型 EEG 特征：弥漫性 δ 慢波（1-4 Hz）占主导、α 活动明显减少、对外界刺激的反应性降低。",
-      en: "This case shows the typical EEG of metabolic encephalopathy: diffuse delta slow waves (1-4 Hz) dominating, markedly reduced alpha, and decreased reactivity to external stimulation.",
+      zh: "同一患者（CHB-MIT chb01 病例）在**没有发作**的时间段取得的 55 秒片段。数据集官方标注该记录不含任何癫痫发作。这一段最适合用来与发作期片段做对照。",
+      en: "A 55-second segment from the same patient (CHB-MIT case chb01) taken during a period with **no seizure**. The dataset annotates this record as containing no seizure. This is the natural baseline for comparison with the ictal segments.",
     },
     details: {
-      zh: "1. 弥漫性多形性 δ 慢波显著增多并占主导\n2. α 与 β 活动明显减少\n3. 对睁眼、呼唤等刺激的反应性减弱\n\n此类谱形常见于肝肾功能异常、电解质紊乱、缺氧等全身代谢问题影响大脑时（教学描述），慢波程度一般与意识障碍程度平行。",
-      en: "1. Diffuse polymorphic delta activity markedly increased and dominant\n2. Alpha and beta markedly reduced\n3. Reduced reactivity to eye opening or calling\n\nThis pattern is typical when systemic metabolic problems (hepatic/renal dysfunction, electrolyte imbalance, hypoxia) affect the brain. The degree of slowing usually parallels the level of consciousness impairment.",
+      zh: "1. 官方标注：chb01_02 记录内发作次数为 0；本片段取自离任何发作都很远的时间窗\n2. 实测频段相对功率：δ 67.7%、θ 18.6%、α 6.3%、β 7.4%\n3. 与发作期对照的关键差异：β 7.4%（发作期 0.3–1.9%）—— 快波在发作间期明显更为丰富\n4. 信号质量评分 69.1 / 100\n\n这段记录里可见 11 个通道被标记为噪声偏高，并有「阵发性尖峰样活动」提示 —— 真实记录很少是「干净」的。",
+      en: "1. Dataset annotation: chb01_02 contains zero seizures; this window is taken far from any seizure\n2. Measured relative band power: δ 67.7%, θ 18.6%, α 6.3%, β 7.4%\n3. Key contrast with the ictal segments: β 7.4% (ictal 0.3–1.9%) — fast activity is markedly richer between seizures\n4. Signal quality score 69.1 / 100\n\nEleven channels are flagged as relatively noisy here, together with a transient spike-like activity note — real recordings are rarely 'clean'.",
     },
-    signal_quality: 60,
-    learning_readability_score: 72,
+    signal_quality: 69.11,
+    learning_readability_score: 79.6,
     beginner_explanation: {
-      zh: "这份脑电几乎全是大而慢的波浪，正常的放松波很少见。教材里讲：大脑整体活动明显变慢，常和身体代谢出问题（如肝肾不好、电解质紊乱、缺氧）有关。这类情况是可逆的，关键在于治疗原发病。",
-      en: "This EEG is dominated by large slow waves, with few normal rhythms. Textbooks explain that pronounced global slowing often relates to metabolic problems (liver/kidney issues, electrolyte imbalance, hypoxia). These are often reversible when the underlying cause is treated.",
+      zh: "这是同一位患者在「没有发作」的时候记录的脑电。和前面三段发作期相比，这里能看到更多快速的小波动，波形也没那么「又大又慢」。把发作期和发作间期放在一起对比，是学习癫痫脑电最直观的方法。",
+      en: "This is the same patient's EEG when they were not having a seizure. Compared with the three ictal segments, you can see more fast, small fluctuations and less 'big and slow' activity. Comparing ictal with interictal records is the most intuitive way to learn about epilepsy EEG.",
     },
     student_explanation: {
-      zh: "代谢性脑病的 EEG：弥漫性多形性 δ 慢波为主，背景节律消失，对外部刺激反应性下降。慢波程度通常与意识水平（嗜睡-昏迷）平行，是可逆性指标。需与结构病变、镇静药物效应、低温等鉴别。",
-      en: "Metabolic encephalopathy EEG: diffuse polymorphic delta predominance, loss of background rhythms, reduced reactivity. The degree of slowing usually parallels consciousness level (lethargy to coma) and is potentially reversible. Exclude structural lesions, sedative effects, and hypothermia.",
+      zh: "发作间期频谱 δ 67.7 / θ 18.6 / α 6.3 / β 7.4（%），与发作期（β ≤1.9%）形成清晰的高频抑制对照。需要注意的是：本段仍有大量慢波成分、且 11 个通道被判为噪声偏高 —— 发作间期记录并不等于「正常脑电」。",
+      en: "The interictal spectrum is δ 67.7 / θ 18.6 / α 6.3 / β 7.4 (%), forming a clear high-frequency contrast against the ictal segments (β ≤1.9%). Note that this segment still contains substantial slow activity and 11 channels are flagged as noisy — an interictal record is not the same as a 'normal EEG'.",
     },
     research_explanation: {
-      zh: "全导联弥漫性 δ（1-4 Hz）活动占优势，α/β 显著衰减，对外部刺激反应性差。此类谱形见于代谢性脑病各阶段，其慢波程度通常与代谢紊乱严重度及意识障碍程度平行，治疗后多可恢复；注意三相波可能随病情进展出现。",
-      en: "Diffuse delta (1-4 Hz) predominance with marked attenuation of alpha/beta and poor reactivity. This pattern is seen across stages of metabolic encephalopathy; the degree of slowing usually parallels severity and often reverses with treatment. Triphasic waves may emerge as the condition progresses.",
+      zh: "chb01_02（数据集标注 0 次发作）中的一段 55 s 窗。实测相对频段功率 δ 67.7 / θ 18.6 / α 6.3 / β 7.4（%），主频 1.67 Hz。与三个发作期片段对比可见 β 的显著差异，可作为「发作期高频抑制」的定量对照。局限：发作间期记录中仍可能存在发作间期痫样放电（本页未做棘波检测标注），因此不能把本段当作「正常参考」。",
+      en: "A 55 s window from chb01_02 (dataset-annotated zero seizures). Measured relative band power δ 67.7 / θ 18.6 / α 6.3 / β 7.4 (%), dominant frequency 1.67 Hz. The β difference versus the three ictal segments gives a quantitative contrast for 'ictal high-frequency suppression'. Limitation: interictal records may still contain interictal epileptiform discharges (not annotated here), so this segment must not be treated as a 'normal reference'.",
     },
     limitations: {
-      zh: ["慢波同样可见于退行性疾病或药物影响", "模拟案例不含血生化等实验室数据", "无法判断具体是哪种代谢紊乱"],
-      en: ["Slowing also occurs in neurodegenerative disease or drug effects", "Simulated case without laboratory data", "Cannot identify the specific metabolic disturbance"],
+      zh: ["这是一位癫痫患者的发作间期记录，不是健康人的脑电基线", "本页未对发作间期痫样放电做标注", "55 秒片段不能代表该患者长期的脑电背景"],
+      en: ["This is an interictal record from a patient with epilepsy, not a healthy baseline", "Interictal epileptiform discharges are not annotated on this page", "A 55-second segment cannot represent this patient's long-term EEG background"],
     },
     what_this_data_cannot_tell: {
-      zh: ["具体是哪种代谢紊乱（需查血等）", "是否会造成永久性脑损伤", "患者能否完全康复"],
-      en: ["Which specific metabolic disturbance (requires labs)", "Whether permanent brain damage exists", "Whether full recovery is possible"],
+      zh: ["这个人是否患有癫痫（发作间期记录尤其不能用来排除）", "该患者下一次发作会在什么时候出现", "健康人群的脑电应该是什么样"],
+      en: ["Whether this person has epilepsy (an interictal record especially cannot exclude it)", "When this patient's next seizure will occur", "What a healthy person's EEG should look like"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["metabolic", "encephalopathy", "delta", "slowing", "clinical"],
-    readTime: "5 分钟",
+    recordRef: "chb01_02",
+    source: mkSource(CHB_DATASET, "chb01_02"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: CHB_DATASET, en: CHB_DATASET },
+    citation: { zh: CHB_CITE, en: CHB_CITE },
+    license: CHB_LIC,
+    recordingType: mkRec(23, 256, 55, CHB_MONTAGE_ZH, CHB_MONTAGE_EN),
+    tags: ["epilepsy", "interictal", "baseline", "chb-mit", "real-data"],
+    readTime: "6 分钟",
   },
   {
     id: "c5",
     title: {
-      zh: "肝性脑病 EEG（Hepatic Encephalopathy）",
-      en: "Hepatic Encephalopathy EEG",
+      zh: "阿尔茨海默病 EEG（真实患者 · MMSE 16）",
+      en: "Alzheimer's Disease EEG (Real Patient · MMSE 16)",
     },
     categoryKey: "clinical",
-    difficultyKey: "advanced",
+    difficultyKey: "intermediate",
     description: {
-      zh: "该案例展示肝性脑病的标志性 EEG 特征：前额优势的三相波（triphasic waves）叠加在弥漫性慢波背景上。",
-      en: "This case shows the hallmark EEG of hepatic encephalopathy: frontal-dominant triphasic waves superimposed on a diffuse slow-wave background.",
+      zh: "真实患者记录：57 岁女性，数据集将其归入阿尔茨海默病组（Group A），MMSE 简易智力状态评分为 16。这是闭眼静息态记录的前 60 秒。",
+      en: "A real patient recording: a 57-year-old female classified by the dataset into the Alzheimer's disease group (Group A), with an MMSE score of 16. This is the first 60 seconds of an eyes-closed resting-state recording.",
     },
     details: {
-      zh: "1. 三相波（正-负-正）在前额区（Fz 附近）最明显，频率约 1.5-2.5 Hz\n2. 背景为弥漫性 δ 慢波\n3. 三相波随意识状态（嗜睡/昏迷）的变化而出现或消失\n\n三相波是肝性脑病最著名的 EEG 标志，但并非特异，也可见于尿毒症等其他代谢性脑病。",
-      en: "1. Triphasic waves (positive-negative-positive) most prominent near Fz, ~1.5-2.5 Hz\n2. Diffuse delta background\n3. Triphasic waves appear/disappear with the level of consciousness\n\nTriphasic waves are the most famous EEG hallmark of hepatic encephalopathy but are not specific; they also occur in uremia and other metabolic encephalopathies.",
+      zh: "1. 数据集标注：Group A（阿尔茨海默病），MMSE 16，57 岁女性\n2. 实测频段相对功率：δ 87.3%、θ 7.9%、α 2.4%、β 2.4%\n3. 同数据集的健康对照（本页病例 8）实测 α 为 4.7% —— 本例 α 约为其一半\n4. 信号质量评分 72.6 / 100\n\n同一数据集内的 α 频段差异是一个可定量比较的信号特征；但它只是单个被试的一段 60 秒记录。",
+      en: "1. Dataset annotation: Group A (Alzheimer's disease), MMSE 16, 57-year-old female\n2. Measured relative band power: δ 87.3%, θ 7.9%, α 2.4%, β 2.4%\n3. A healthy control from the same dataset (case 8 on this page) measures α at 4.7% — roughly twice the value here\n4. Signal quality score 72.6 / 100\n\nThe α-band difference within one dataset is a quantifiable signal feature; but this is a single 60-second recording from one participant.",
     },
-    signal_quality: 55,
-    learning_readability_score: 68,
+    signal_quality: 72.62,
+    learning_readability_score: 84.0,
     beginner_explanation: {
-      zh: "这份记录里有一种「一上、一下、再上」的特殊波浪，集中在额头附近，背景脑波也明显变慢。教材里把这种特殊波形和肝脏功能严重受损后大脑受影响的情况（肝性脑病）联系在一起，也提醒它不是肝病独有的。",
-      en: "This record shows a distinctive 'up-down-up' wave concentrated near the forehead, over a clearly slowed background. Textbooks associate this wave with hepatic encephalopathy (severe liver failure affecting the brain), while noting it is not exclusive to liver disease.",
+      zh: "这段脑电来自一位被诊断为阿尔茨海默病的患者。分析显示，其中的 α 节律（约 8–13 Hz 的波动）占比偏低。研究文献中常提到：一些阿尔茨海默病患者的 α 活动会减少、慢波增多。但请注意：这只是一个人的一段记录，不能用来诊断任何人，也不能代表所有患者。",
+      en: "This EEG comes from a person diagnosed with Alzheimer's disease. The analysis shows a relatively low share of α rhythm (roughly 8–13 Hz). The literature often notes that some patients with Alzheimer's disease show reduced α activity and increased slow waves. Note carefully, however: this is one recording from one person — it cannot diagnose anyone and does not represent all patients.",
     },
     student_explanation: {
-      zh: "三相波：前额优势、双同步，频率 1.5-2.5 Hz，每波前后波幅递减。背景弥漫性 δ 慢化。三相波与血氨升高相关，是肝性脑病 II-III 期的经典表现；同样可见于尿毒症、缺氧等，需结合临床与实验室判断。",
-      en: "Triphasic waves: frontal-dominant, bisynchronous, 1.5-2.5 Hz, with decreasing amplitude across each wave. Diffuse delta background. Triphasic waves correlate with hyperammonemia and are classic in hepatic encephalopathy stages II-III; they also occur in uremia and hypoxia, requiring clinical and laboratory correlation.",
+      zh: "本段 α 相对功率 2.4%，慢波（δ+θ）合计 95.2%。若与同数据集的健康对照（α 4.7%）并置，可见 α 减少的倾向 —— 与文献中「AD 患者 α 功率下降、慢波功率上升」的方向一致。但这只是一个被试的横截面观察，任何因果或个体化推断都不成立。",
+      en: "α relative power here is 2.4%, with slow activity (δ+θ) at 95.2%. Placed beside a healthy control from the same dataset (α 4.7%), a tendency toward reduced α emerges — consistent in direction with reports that α power decreases and slow-wave power increases in Alzheimer's disease. This is, however, a single cross-sectional observation; no causal or individualised inference follows.",
     },
     research_explanation: {
-      zh: "记录显示前额优势三相波（约 2 Hz，前后波幅递减），背景弥漫性 δ 慢化；三相波的出现与消退通常与血氨水平及意识状态平行。鉴别诊断包括尿毒症性脑病、锂中毒与克雅氏病。EEG 对肝性脑病严重度分级与疗效评估有辅助价值。",
-      en: "Frontal-dominant triphasic waves (~2 Hz, decreasing amplitude across waves) over a diffusely slowed background; appearance and resolution usually parallel ammonia levels and consciousness. Differential includes uremic encephalopathy, lithium toxicity, and Creutzfeldt-Jakob disease. EEG supports grading and treatment monitoring in hepatic encephalopathy.",
+      zh: "ds004504 的 sub-001（Group A，MMSE 16，57 岁女性）闭眼静息态前 60 s。19 通道、500 Hz、10-20 系统。实测相对频段功率 δ 87.3 / θ 7.9 / α 2.4 / β 2.4（%），主频 1.95 Hz。参考该数据集的原始描述文献（doi:10.3390/data8060095）与 DICE-net 研究（doi:10.1109/ACCESS.2023.3294618）。局限：单被试、单时间窗、未做个体化阻抗/伪迹校正，不可用于任何诊断或筛查用途。",
+      en: "First 60 s of eyes-closed resting-state EEG from ds004504 sub-001 (Group A, MMSE 16, 57-year-old female); 19 channels at 500 Hz, 10-20 system. Measured relative band power δ 87.3 / θ 7.9 / α 2.4 / β 2.4 (%), dominant frequency 1.95 Hz. See the dataset descriptor (doi:10.3390/data8060095) and the DICE-net study (doi:10.1109/ACCESS.2023.3294618). Limitations: single subject, single window, no individualised impedance/artefact correction; not usable for any diagnostic or screening purpose.",
     },
     limitations: {
-      zh: ["三相波非肝病特有", "模拟案例不含血氨等检验数据", "无法判断肝功能的具体损伤程度"],
-      en: ["Triphasic waves are not specific to liver disease", "Simulated case without ammonia/lab data", "Cannot grade the degree of liver dysfunction"],
+      zh: ["只有这一位患者的一段 60 秒记录，不能代表阿尔茨海默病群体", "患者年龄、用药、睡眠状态等都会影响频谱，本页无法控制这些因素", "本案例不提供任何诊断或筛查信息"],
+      en: ["One 60-second recording from one patient cannot represent the Alzheimer's disease population", "Age, medication and sleep state all affect the spectrum and cannot be controlled here", "This case provides no diagnostic or screening information"],
     },
     what_this_data_cannot_tell: {
-      zh: ["是否真的患有肝性脑病（需综合诊断）", "肝脏损伤的具体病因", "患者预后"],
-      en: ["Whether the person truly has hepatic encephalopathy", "The specific cause of liver injury", "Patient prognosis"],
+      zh: ["这个人是否患有阿尔茨海默病（需临床评估与神经心理学检查）", "认知障碍的严重程度或进展速度", "任何其他人的认知状况"],
+      en: ["Whether this person has Alzheimer's disease (clinical assessment and neuropsychological testing are required)", "The severity or rate of progression of cognitive impairment", "Anyone else's cognitive status"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["hepatic", "triphasic", "delta", "clinical", "advanced"],
-    readTime: "5 分钟",
+    recordRef: "sub-001",
+    source: mkSource(DS_DATASET, "sub-001"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: DS_DATASET, en: DS_DATASET },
+    citation: { zh: DS_CITE, en: DS_CITE },
+    license: DS_LIC,
+    recordingType: mkRec(19, 500, 60, DS_MONTAGE_ZH, DS_MONTAGE_EN),
+    tags: ["alzheimers", "dementia", "alpha", "resting-state", "ds004504", "real-data"],
+    readTime: "6 分钟",
   },
   {
     id: "c6",
     title: {
-      zh: "发作性睡病 EEG（Narcolepsy）",
-      en: "Narcolepsy EEG",
+      zh: "阿尔茨海默病 EEG（真实患者 · MMSE 22）",
+      en: "Alzheimer's Disease EEG (Real Patient · MMSE 22)",
     },
-    categoryKey: "sleep",
+    categoryKey: "clinical",
     difficultyKey: "intermediate",
     description: {
-      zh: "该案例展示发作性睡病的典型 EEG 特征：白天嗜睡期出现睡眠起始快速眼动（SOREM）、清醒期 θ 活动增多、频繁微睡眠。",
-      en: "This case shows the typical EEG of narcolepsy: sleep-onset REM (SOREM) during daytime naps, increased theta activity while awake, and frequent microsleeps.",
+      zh: "同数据集中的另一位阿尔茨海默病患者：78 岁女性，MMSE 22。同样是闭眼静息态的前 60 秒。与病例 5 相比，两位患者的频谱并不相同。",
+      en: "Another patient with Alzheimer's disease from the same dataset: a 78-year-old female with an MMSE of 22. Again the first 60 seconds of an eyes-closed resting-state recording. Compared with case 5, the two patients do not share the same spectrum.",
     },
     details: {
-      zh: "1. 清醒期 θ 活动增多、α 反应性下降\n2. 入睡后 15 分钟内出现 REM（SOREM）\n3. 记录中可见多次微睡眠（microsleep）片段\n\nSOREM 是发作性睡病诊断的重要支持指标，也是多次睡眠潜伏期试验（MSLT）的核心判据之一。",
-      en: "1. Increased theta and reduced alpha reactivity while awake\n2. REM appears within 15 minutes of sleep onset (SOREM)\n3. Multiple microsleep episodes during the recording\n\nSOREM is an important supporting criterion for narcolepsy and a core metric of the multiple sleep latency test (MSLT).",
+      zh: "1. 数据集标注：Group A（阿尔茨海默病），MMSE 22，78 岁女性\n2. 实测频段相对功率：δ 89.5%、θ 6.5%、α 2.1%、β 1.9%\n3. 与病例 5（MMSE 16，α 2.4%）相比，本例 α 更低（2.1%）—— 但两个被试的 MMSE 差异并不能由一条频谱解释\n4. 信号质量评分 74.7 / 100",
+      en: "1. Dataset annotation: Group A (Alzheimer's disease), MMSE 22, 78-year-old female\n2. Measured relative band power: δ 89.5%, θ 6.5%, α 2.1%, β 1.9%\n3. Compared with case 5 (MMSE 16, α 2.4%), α is slightly lower here (2.1%) — but the MMSE difference between two participants cannot be explained by one spectrum\n4. Signal quality score 74.7 / 100",
     },
-    signal_quality: 70,
-    learning_readability_score: 76,
+    signal_quality: 74.69,
+    learning_readability_score: 84.0,
     beginner_explanation: {
-      zh: "这份记录显示这个人在白天也频繁「滑进睡眠」，而且入睡后很快进入做梦（REM）阶段。教材里把白天不可抑制地犯困、一睡就做梦的情况，和发作性睡病放在一起讲，并强调确诊需要做整夜睡眠监测和多次小睡试验。",
-      en: "This record shows the person repeatedly slipping into sleep during the day, entering REM (dreaming) very quickly after sleep onset. Textbooks link uncontrollable daytime sleepiness with sleep-onset dreaming to narcolepsy, and emphasize diagnosis requires overnight sleep study and MSLT.",
+      zh: "这是同数据集里的另一位患者。虽然都被归入阿尔茨海默病组，但两人的脑电频谱并不一样。这一点很重要：一个标签（诊断）背后，脑电表现可以有很多种样子。",
+      en: "This is another patient from the same dataset. Although both are classified in the Alzheimer's disease group, their spectra differ. That matters: behind one label (a diagnosis), the EEG can look quite different from person to person.",
     },
     student_explanation: {
-      zh: "发作性睡病（1 型）EEG 特点：清醒期 θ 增多，MSLT 平均入睡潜伏期显著缩短（<8 min）且出现 ≥2 次 SOREM；夜间多导睡眠图可见入睡期 REM。需排除睡眠剥夺、睡眠呼吸暂停等其他引起嗜睡的原因。",
-      en: "Narcolepsy type 1 EEG features: increased awake theta, markedly shortened mean sleep latency (<8 min) with ≥2 SOREMs on MSLT; nocturnal PSG may show sleep-onset REM. Exclude sleep deprivation, sleep apnea, and other causes of hypersomnia.",
+      zh: "δ 89.0% 是本案例库中慢波占比最高的一段。与病例 5 并置可见：同为 Group A，δ 从 86.7% 到 89.0%、α 从 2.4% 到 2.1%。这些差异说明「组内变异」不可忽略，也说明单被试比较的局限。",
+      en: "δ at 89.0% is the highest slow-wave share in this case library. Side by side with case 5: within Group A, δ ranges 86.7–89.0% and α 2.4–2.1%. Such differences show that within-group variability cannot be ignored and illustrate the limits of single-subject comparison.",
     },
     research_explanation: {
-      zh: "清醒背景弥漫性 θ 活动增多，多次微睡眠；MSLT 平均入睡潜伏期显著缩短并出现多次 SOREM。SOREM 的病理生理基础与下丘脑食欲素（orexin）神经元缺失相关（1 型）。EEG/PSG 是客观诊断的核心工具，但需结合猝倒等临床表现。",
-      en: "Diffuse theta increase in wakefulness with repeated microsleeps; markedly shortened MSLT mean latency with multiple SOREMs. SOREM pathophysiology relates to hypothalamic orexin neuron loss (type 1). EEG/PSG are core objective diagnostic tools but must be combined with clinical features such as cataplexy.",
+      zh: "ds004504 的 sub-002（Group A，MMSE 22，78 岁女性）闭眼静息态前 60 s。19 通道 500 Hz。实测 δ 89.5 / θ 6.5 / α 2.1 / β 1.9（%），主频 1.95 Hz。与 sub-001 并置可作为「同组内频谱异质性」的示例；真正的人群层面结论需要按该数据集的规范流程（含全部被试、交叉验证）得出，单例不构成证据。",
+      en: "First 60 s of eyes-closed resting-state EEG from ds004504 sub-002 (Group A, MMSE 22, 78-year-old female); 19 channels at 500 Hz. Measured δ 89.5 / θ 6.5 / α 2.1 / β 1.9 (%), dominant frequency 1.95 Hz. Together with sub-001 this illustrates within-group spectral heterogeneity; population-level conclusions require the dataset's full protocol (all participants, cross-validation) — single cases are not evidence.",
     },
     limitations: {
-      zh: ["白天嗜睡可见于睡眠不足等多种原因", "模拟案例不含 MSLT 完整数据", "单次小睡记录不足以诊断"],
-      en: ["Daytime sleepiness has many causes (e.g., sleep deprivation)", "Simulated case without full MSLT data", "A single nap recording is insufficient for diagnosis"],
+      zh: ["单被试记录，不能代表阿尔茨海默病群体", "不能由频谱差异反推认知评分的差异", "本案例不提供任何诊断或筛查信息"],
+      en: ["A single-subject recording cannot represent the Alzheimer's disease population", "Spectral differences cannot be used to infer differences in cognitive scores", "This case provides no diagnostic or screening information"],
     },
     what_this_data_cannot_tell: {
-      zh: ["是否真的患有发作性睡病（需综合诊断）", "白天嗜睡的根本原因", "猝倒等伴随症状是否存在"],
-      en: ["Whether the person truly has narcolepsy", "The root cause of daytime sleepiness", "Whether cataplexy or other symptoms are present"],
+      zh: ["这个人是否患有阿尔茨海默病", "疾病处于什么阶段", "任何其他人的认知状况"],
+      en: ["Whether this person has Alzheimer's disease", "What stage the disease is at", "Anyone else's cognitive status"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["narcolepsy", "sleep", "sorem", "theta", "clinical"],
+    recordRef: "sub-002",
+    source: mkSource(DS_DATASET, "sub-002"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: DS_DATASET, en: DS_DATASET },
+    citation: { zh: DS_CITE, en: DS_CITE },
+    license: DS_LIC,
+    recordingType: mkRec(19, 500, 60, DS_MONTAGE_ZH, DS_MONTAGE_EN),
+    tags: ["alzheimers", "dementia", "alpha", "resting-state", "ds004504", "real-data"],
     readTime: "5 分钟",
   },
   {
     id: "c7",
     title: {
-      zh: "深度睡眠 N3 期 EEG（Deep Sleep N3）",
-      en: "Deep Sleep N3 EEG",
+      zh: "额颞叶痴呆 EEG（真实患者）",
+      en: "Frontotemporal Dementia EEG (Real Patient)",
     },
-    categoryKey: "sleep",
-    difficultyKey: "beginner",
+    categoryKey: "clinical",
+    difficultyKey: "intermediate",
     description: {
-      zh: "该案例展示深度睡眠（N3 期）的典型 EEG 特征：高幅慢波（δ，0.5-2 Hz，>75 μV）占主导，穿插睡眠纺锤波与 K 复合波。",
-      en: "This case shows the typical EEG of deep sleep (N3): high-amplitude slow waves (delta, 0.5-2 Hz, >75 µV) dominating, with sleep spindles and K-complexes.",
+      zh: "真实患者记录：73 岁男性，数据集将其归入额颞叶痴呆组（Group F），MMSE 20。闭眼静息态前 60 秒。额颞叶痴呆是另一类常见的早发性痴呆。",
+      en: "A real patient recording: a 73-year-old male classified by the dataset into the frontotemporal dementia group (Group F), with an MMSE of 20. The first 60 seconds of an eyes-closed resting-state recording. Frontotemporal dementia is another common form of early-onset dementia.",
     },
     details: {
-      zh: "1. 高幅 δ 慢波（0.5-2 Hz，振幅 >75 μV）占记录 20% 以上\n2. 可见睡眠纺锤波（12-14 Hz）与 K 复合波\n3. 这是非快速眼动（NREM）睡眠最深的阶段，与身体修复和记忆巩固密切相关\n\n深度睡眠是健康睡眠的重要组成部分，通常在入睡后首个睡眠周期最多。",
-      en: "1. High-amplitude delta slow waves (0.5-2 Hz, >75 µV) occupy over 20% of the record\n2. Sleep spindles (12-14 Hz) and K-complexes present\n3. This is the deepest NREM stage, crucial for physical restoration and memory consolidation\n\nDeep sleep is most abundant in the first sleep cycle of the night.",
+      zh: "1. 数据集标注：Group F（额颞叶痴呆），MMSE 20，73 岁男性\n2. 实测频段相对功率：δ 87.2%、θ 8.1%、α 2.7%、β 2.1%\n3. 信号质量评分 67.3 / 100（本案例库中最低的一段，伪影扣分 15.0）\n\n把 AD 与 FTD 两组片段并置可以看出：闭眼静息态频谱在两组之间并没有一眼可辨的差异 —— 这正是需要在规范流程下做定量研究的原因。",
+      en: "1. Dataset annotation: Group F (frontotemporal dementia), MMSE 20, 73-year-old male\n2. Measured relative band power: δ 87.2%, θ 8.1%, α 2.7%, β 2.1%\n3. Signal quality score 67.3 / 100 (the lowest in this case library, with a full 15.0 artefact penalty)\n\nPlacing AD and FTD segments side by side shows that the resting-state spectrum does not differ in any immediately obvious way between the two groups — which is exactly why quantitative study under a formal protocol is needed.",
     },
-    signal_quality: 85,
-    learning_readability_score: 80,
+    signal_quality: 67.27,
+    learning_readability_score: 83.9,
     beginner_explanation: {
-      zh: "这份记录显示大脑正处在很深的睡眠里：到处是「又高又宽」的慢波，这是身体进入深度修复阶段的标志。人在这个阶段很难被叫醒，睡眠质量好不好，很大程度上取决于深度睡眠够不够。",
-      en: "This record shows the brain in deep sleep: large, broad slow waves everywhere — a sign of deep restoration. People are hard to wake at this stage, and sleep quality largely depends on getting enough deep sleep.",
+      zh: "这段脑电来自一位被诊断为额颞叶痴呆的患者。它的频谱看起来和前面阿尔茨海默病的两段很接近 —— 这提醒我们：光靠肉眼看脑电波形，往往区分不出不同的疾病。脑电是一种需要定量分析的信号。",
+      en: "This EEG comes from a person diagnosed with frontotemporal dementia. Its spectrum looks close to the two Alzheimer's segments above — a reminder that different conditions often cannot be told apart by eye from an EEG trace. EEG is a signal that calls for quantitative analysis.",
     },
     student_explanation: {
-      zh: "N3 期（慢波睡眠）判读：高幅 δ 慢波（>75 μV，0.5-2 Hz）占 ≥20%；纺锤波（12-14 Hz）与 K 复合波出现在 N2 期并延续至 N3。此阶段与生长激素分泌、突触稳态调节和记忆巩固密切相关。",
-      en: "N3 (slow-wave sleep) scoring: high-amplitude delta (>75 µV, 0.5-2 Hz) occupying ≥20%; spindles (12-14 Hz) and K-complexes appear in N2 and continue into N3. This stage relates to growth hormone secretion, synaptic homeostasis, and memory consolidation.",
+      zh: "本例 δ 87.2 / θ 8.1 / α 2.7 / β 2.1（%），与病例 5、6（AD 组）几乎落在同一区间。同时本例信号质量最低（67.3，伪影扣满分）—— 真实临床记录中伪影与被试状态的影响很难完全排除，这是做组间比较时必须处理的问题。",
+      en: "Here δ 87.2 / θ 8.1 / α 2.7 / β 2.1 (%) sits almost in the same range as cases 5 and 6 (AD group). Signal quality is also the lowest here (67.3, full artefact penalty) — in real clinical recordings, artefact and participant state cannot be fully excluded, which is precisely what group comparisons must account for.",
     },
     research_explanation: {
-      zh: "慢波活动（SWA，0.5-2 Hz 高幅）占 N3 期主导，纺锤波密度较高；SWA 与睡眠压力正相关（睡眠剥夺后显著增加），是睡眠稳态（process S）的核心电生理指标，也是衰老研究中随年龄递减的标志性变化之一。",
-      en: "Slow-wave activity (SWA, high-amplitude 0.5-2 Hz) dominates N3 with notable spindle density. SWA correlates positively with sleep pressure (markedly increased after sleep deprivation), serving as the core electrophysiological marker of sleep homeostasis (Process S) and a hallmark of age-related decline.",
+      zh: "ds004504 的 sub-066（Group F，MMSE 20，73 岁男性）闭眼静息态前 60 s。19 通道 500 Hz。实测 δ 87.2 / θ 8.1 / α 2.7 / β 2.1（%），主频 1.95 Hz，信号质量 67.3（伪影扣分 15.0，为满分扣分）。AD（sub-001/002）与 FTD（sub-066）在本页三个单例上不可区分；跨组别区分需按数据集规范做全样本建模与交叉验证。",
+      en: "First 60 s of eyes-closed resting-state EEG from ds004504 sub-066 (Group F, MMSE 20, 73-year-old male); 19 channels at 500 Hz. Measured δ 87.2 / θ 8.1 / α 2.7 / β 2.1 (%), dominant frequency 1.95 Hz, signal quality 67.3 (artefact penalty at its maximum). AD (sub-001/002) and FTD (sub-066) are indistinguishable across these three single cases; cross-group discrimination requires full-sample modelling and cross-validation per the dataset protocol.",
     },
     limitations: {
-      zh: ["深度睡眠量受年龄、药物、作息影响", "模拟案例不含呼吸/心电等同步监测", "无法评估整夜睡眠结构"],
-      en: ["Deep sleep quantity varies with age, drugs, and schedule", "Simulated case without respiratory/ECG channels", "Cannot assess whole-night sleep architecture"],
+      zh: ["单被试记录，不能代表额颞叶痴呆群体", "本段信号质量较低，伪影可能影响频谱估计", "本案例不提供任何诊断信息"],
+      en: ["A single-subject recording cannot represent the FTD population", "Signal quality is relatively low here, so artefact may affect the spectral estimate", "This case provides no diagnostic information"],
     },
     what_this_data_cannot_tell: {
-      zh: ["睡眠质量的好坏（需结合整夜结构与主观感受）", "是否存在睡眠障碍（如呼吸暂停）", "做梦的内容"],
-      en: ["Overall sleep quality (requires full-night architecture and subjective report)", "Whether a sleep disorder (e.g., apnea) is present", "Dream content"],
+      zh: ["这个人是否患有额颞叶痴呆", "与阿尔茨海默病如何区分", "任何其他人的健康状况"],
+      en: ["Whether this person has frontotemporal dementia", "How to distinguish it from Alzheimer's disease", "Anyone else's health status"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["sleep", "n3", "delta", "slowwave", "spindle"],
+    recordRef: "sub-066",
+    source: mkSource(DS_DATASET, "sub-066"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: DS_DATASET, en: DS_DATASET },
+    citation: { zh: DS_CITE, en: DS_CITE },
+    license: DS_LIC,
+    recordingType: mkRec(19, 500, 60, DS_MONTAGE_ZH, DS_MONTAGE_EN),
+    tags: ["ftd", "dementia", "resting-state", "ds004504", "real-data"],
     readTime: "5 分钟",
   },
   {
     id: "c8",
     title: {
-      zh: "偏头痛发作间期 EEG（Migraine Interictal）",
-      en: "Migraine Interictal EEG",
+      zh: "健康对照 EEG（同数据集对照组）",
+      en: "Healthy Control EEG (Same Dataset)",
     },
     categoryKey: "clinical",
     difficultyKey: "beginner",
     description: {
-      zh: "该案例展示偏头痛患者发作间期的常见 EEG 表现：间歇性慢波活动、光刺激下增强的光驱动反应，背景节律基本正常。",
-      en: "This case shows common interictal EEG findings in migraine patients: intermittent slow waves and enhanced photic driving during photic stimulation, with otherwise normal background.",
+      zh: "真实被试记录：57 岁男性，数据集将其归入健康对照组（Group C），MMSE 30（满分）。这是与病例 5–7 来自同一数据集、同一记录方案的对照记录。",
+      en: "A real participant recording: a 57-year-old male classified by the dataset into the healthy control group (Group C), with a full MMSE of 30. This is a control recording from the same dataset and the same acquisition protocol as cases 5–7.",
     },
     details: {
-      zh: "1. 背景节律基本正常，可见间歇性 θ 慢波\n2. 闪光刺激（IPS）时枕区出现增强的光驱动反应\n3. 上述改变多为非特异性，可见于部分偏头痛患者发作间期\n\nEEG 在偏头痛诊断中主要用于排除其他原因（如癫痫），本身不用于确诊偏头痛。",
-      en: "1. Background largely normal with intermittent theta slow waves\n2. Enhanced occipital photic driving during intermittent photic stimulation (IPS)\n3. These changes are non-specific and seen in some migraine patients between attacks\n\nEEG in migraine workup mainly serves to exclude other causes (e.g., epilepsy); it does not diagnose migraine itself.",
+      zh: "1. 数据集标注：Group C（健康对照），MMSE 30，57 岁男性\n2. 实测频段相对功率：δ 85.0%、θ 7.8%、α 4.7%、β 2.5%\n3. 关键对照点：本例 α 4.7%，而 AD 两例分别为 2.4%、2.1% —— 约为一倍差距\n4. 信号质量评分 70.0 / 100\n\n请注意：这是一位健康被试的记录，但它同样只是一段 60 秒的数据，不能代表「正常人脑电」的全部样貌。",
+      en: "1. Dataset annotation: Group C (healthy control), MMSE 30, 57-year-old male\n2. Measured relative band power: δ 85.0%, θ 7.8%, α 4.7%, β 2.5%\n3. The key contrast: α is 4.7% here versus 2.4% and 2.1% in the two Alzheimer's cases — roughly a two-fold difference\n4. Signal quality score 70.0 / 100\n\nNote: this is a healthy participant's recording, but it is still one 60-second window and does not represent the full range of 'normal' EEG.",
     },
-    signal_quality: 78,
-    learning_readability_score: 75,
+    signal_quality: 70.01,
+    learning_readability_score: 84.0,
     beginner_explanation: {
-      zh: "这份脑电大部分是正常的，但做闪光刺激时脑波对闪光的「跟随反应」比常人更强，还偶尔有些慢波。教材里提到，偏头痛的人在发作间期做脑电，有时能看到这样的表现；但脑电不能用来确诊偏头痛。",
-      en: "This EEG is mostly normal, but during flashing-light stimulation the brain's 'following response' is stronger than usual, with occasional slow waves. Textbooks note that people with migraine may show this between attacks; EEG, however, cannot diagnose migraine.",
+      zh: "这是同一位研究者记录的「健康对照组」脑电。把它和前面阿尔茨海默病、额颞叶痴呆的片段对比，你会看到 α 节律（约 8–13 Hz 的波动）占比相对更高一些。但一定要记住：这是单个被试、单段记录，不能拿来判定任何人的健康与否。",
+      en: "This is a healthy-control EEG from the same study. Compare it with the Alzheimer's and FTD segments above and you will see a somewhat higher share of α rhythm (roughly 8–13 Hz). Always remember: this is a single participant and a single window — it cannot be used to judge anyone's health.",
     },
     student_explanation: {
-      zh: "偏头痛发作间期 EEG 多为非特异性改变：间歇性慢波、光驱动反应增强（枕区）。约 10-30% 的患者可有枕区慢波。此类改变对偏头痛无诊断特异性，主要价值在于排除症状性病因（如癫痫、占位性病变）。",
-      en: "Interictal migraine EEG shows non-specific changes: intermittent slow waves and enhanced photic driving (occipital). Occipital slow waves occur in ~10-30% of patients. These findings lack diagnostic specificity and mainly serve to exclude symptomatic causes (epilepsy, structural lesions).",
+      zh: "本例 α 相对功率 4.7%，约为同数据集 AD 两例（2.4%、2.1%）的两倍。这组数值构成了「对照组—患者组」在这一指标上的直观对照，但单例对照不构成统计证据。",
+      en: "α relative power here is 4.7%, roughly double that of the two Alzheimer's cases in the same dataset (2.4%, 2.1%). These values provide an intuitive control-versus-patient contrast on this metric — but single-case contrasts are not statistical evidence.",
     },
     research_explanation: {
-      zh: "发作间期记录：间歇性 θ 活动，IPS 下枕区光驱动反应显著增强；背景 α 节律保留。此类非特异性改变在偏头痛患者中较对照组更常见，但诊断价值有限。EEG 的主要临床用途是排除癫痫与其他结构性病因；偏头痛诊断仍以临床标准（ICHD）为准。",
-      en: "Interictal record: intermittent theta activity and markedly enhanced occipital photic driving under IPS; preserved alpha background. Such non-specific changes are more common in migraine than controls but have limited diagnostic value. EEG mainly serves to exclude epilepsy and structural causes; migraine diagnosis follows clinical criteria (ICHD).",
+      zh: "ds004504 的 sub-037（Group C，MMSE 30，57 岁男性）闭眼静息态前 60 s。19 通道 500 Hz。实测 δ 85.0 / θ 7.8 / α 4.7 / β 2.5（%），主频 1.95 Hz。本段与 sub-001/002（AD）、sub-066（FTD）使用完全相同的采集与预处理流程，因此适合作为「同方案对照」展示。局限：单被试、单窗、未做个体化校正。",
+      en: "First 60 s of eyes-closed resting-state EEG from ds004504 sub-037 (Group C, MMSE 30, 57-year-old male); 19 channels at 500 Hz. Measured δ 85.0 / θ 7.8 / α 4.7 / β 2.5 (%), dominant frequency 1.95 Hz. This segment shares the identical acquisition and preprocessing protocol with sub-001/002 (AD) and sub-066 (FTD), making it suitable as a same-protocol control. Limitations: single subject, single window, no individualised correction.",
     },
     limitations: {
-      zh: ["间歇性慢波无特异性，可见于多种情况", "模拟案例不含头痛发作时间等临床信息", "光驱动增强同样可见于部分正常人"],
-      en: ["Intermittent slow waves are non-specific", "Simulated case without headache timing/clinical data", "Enhanced photic driving also occurs in some healthy people"],
+      zh: ["单个健康被试不能代表「正常脑电」的分布范围", "本例年龄（57 岁）与患者组并不完全匹配", "本案例不提供任何诊断或筛查信息"],
+      en: ["A single healthy participant cannot represent the distribution of 'normal EEG'", "This participant's age (57) is not perfectly matched to the patient groups", "This case provides no diagnostic or screening information"],
     },
     what_this_data_cannot_tell: {
-      zh: ["是否真的患有偏头痛（需临床诊断）", "头痛的具体类型", "未来发作的频率或时间"],
-      en: ["Whether the person truly has migraine (clinical diagnosis required)", "The specific headache type", "Future attack frequency or timing"],
+      zh: ["任何人的健康状况", "判断某段脑电是否「异常」的通用阈值", "人群层面的组间差异"],
+      en: ["Anyone's health status", "A universal threshold for calling an EEG 'abnormal'", "Group-level differences at the population scale"],
     },
-    source: {
-      zh: "教学示意案例：基于公开医学文献中典型 EEG 特征的描述构建，非真实患者数据。",
-      en: "Educational illustration built from typical EEG features described in public medical literature; not real patient data.",
-    },
-    tags: ["migraine", "slowing", "photophobia", "interictal", "clinical"],
+    recordRef: "sub-037",
+    source: mkSource(DS_DATASET, "sub-037"),
+    dataKind: "real",
+    sourceType: "public",
+    dataset: { zh: DS_DATASET, en: DS_DATASET },
+    citation: { zh: DS_CITE, en: DS_CITE },
+    license: DS_LIC,
+    recordingType: mkRec(19, 500, 60, DS_MONTAGE_ZH, DS_MONTAGE_EN),
+    tags: ["control", "healthy", "alpha", "resting-state", "ds004504", "real-data"],
     readTime: "5 分钟",
-  },
-  {
-    id: "c9",
-    title: {
-      zh: "癫痫发作期 EEG（Seizure EEG）",
-      en: "Seizure EEG (Ictal Recording)",
-      es: "EEG de Crisis (Registro Ictal)",
-      fr: "EEG de Crise (Enregistrement Ictal)",
-      de: "Anfall-EEG (Iktale Aufzeichnung)",
-      ja: "発作期EEG（Iktal記録）",
-      ko: "발작기 EEG (Iktal 기록)",
-    },
-    categoryKey: "clinical",
-    difficultyKey: "advanced",
-    description: {
-      zh: "这份 EEG 数据来自一名癫痫患者在癫痫发作期间的记录。信号质量评分 68/100，显示典型的发作期图案：节律性尖波放电，频率 3-5 Hz，主要分布在颞叶区域。",
-      en: "This EEG data is from an epilepsy patient during a seizure episode. Signal quality score 68/100, showing typical ictal patterns: rhythmic spike-and-wave discharges at 3-5 Hz, predominantly in temporal regions.",
-      es: "Estos datos EEG son de un paciente con epilepsia durante un episodio de crisis. Puntuación de calidad de señal 68/100, muestra patrones ictales típicos: descargas rítmicas punta-onda a 3-5 Hz, predominantemente en regiones temporales.",
-      fr: "Ces données EEG proviennent d'un patient épileptique pendant un épisode de crise. Score de qualité du signal 68/100, montrant des motifs ictaux typiques : décharges rythmiques pointe-onde à 3-5 Hz, principalement dans les régions temporales.",
-      de: "Diese EEG-Daten stammen von einem Epilepsie-Patienten während einer Anfallsepisode. Signalqualitätsscore 68/100, zeigt typische iktale Muster: rhythmische Spike-Wave-Entladungen bei 3-5 Hz, vorwiegend in temporalen Regionen.",
-      ja: "このEEGデータはてんかん患者の発作エピソード中の記録です。信号品質スコア68/100、典型的な発作期パターンを示します：3-5Hzのリズミカルなスパイク・波放電、主に側頭領域に分布。",
-      ko: "이 EEG 데이터는 발작 에피소드 중 간질 환자의 것입니다. 신호 품질 점수 68/100, 전형적인 발작기 패턴 표시: 3-5Hz의 리듬감 있는 첨단-파 방전, 주로 측두부 영역에 분포.",
-    },
-    details: {
-      zh: "此案例展示癫痫发作期的典型 EEG 特征：\n\n1. 节律性尖波-慢波复合体（3-5 Hz），主要位于颞叶（T3、T4、T5、T6）\n2. 发作扩散：从局部开始，逐渐扩散到同侧半球\n3. 振幅逐渐增高，频率逐渐减慢\n4. 发作后可见弥漫性慢波（post-ictal suppression）\n\n这是识别癫痫发作期图案的关键案例，对临床 EEG 解读具有重要意义。",
-      en: "This case demonstrates typical ictal EEG features:\n\n1. Rhythmic spike-and-slow-wave complexes (3-5 Hz), mainly in temporal lobes (T3, T4, T5, T6)\n2. Seizure spread: starts locally, gradually spreads to ipsilateral hemisphere\n3. Amplitude gradually increases, frequency gradually slows\n4. Post-ictal diffuse slow waves (post-ictal suppression) visible after seizure\n\nThis is a key case for recognizing ictal patterns, critical for clinical EEG interpretation.",
-      es: "Este caso demuestra características típicas de EEG ictal:\n\n1. Complejos rítmicos punta-onda lenta (3-5 Hz), principalmente en lóbulos temporales (T3, T4, T5, T6)\n2. Propagación de la crisis: comienza localmente, se extiende gradualmente al hemisferio ipsilateral\n3. La amplitud aumenta gradualmente, la frecuencia disminuye gradualmente\n4. Ondas lentas difusas post-ictales (supresión post-ictal) visibles después de la crisis\n\nEste es un caso clave para reconocer patrones ictales, crítico para la interpretación clínica de EEG.",
-      fr: "Ce cas démontre les caractéristiques typiques d'EEG ictal :\n\n1. Complexes rythmiques pointe-onde lente (3-5 Hz), principalement dans les lobes temporaux (T3, T4, T5, T6)\n2. Propagation de la crise : commence localement, s'étend progressivement à l'hémisphère ipsilatéral\n3. L'amplitude augmente progressivement, la fréquence diminue progressivement\n4. Ondes lentes diffuses post-ictales (suppression post-ictale) visibles après la crise\n\nC'est un cas clé pour reconnaître les motifs ictaux, critique pour l'interprétation clinique de l'EEG.",
-      de: "Dieser Fall demonstriert typische iktale EEG-Merkmale:\n\n1. Rhythmische Spike-und-Langsamwelle-Komplexe (3-5 Hz), hauptsächlich in den Temporallappen (T3, T4, T5, T6)\n2. Anfallausbreitung: beginnt lokal, breitet sich allmählich auf die ipsilaterale Hemisphäre aus\n3. Amplitude steigt allmählich, Frequenz verlangsamt sich allmählich\n4. Postiktale diffuse Langsamwellen (postiktale Suppression) nach dem Anfall sichtbar\n\nDies ist ein Schlüsselfall zum Erkennen iktaler Muster, kritisch für die klinische EEG-Interpretation.",
-      ja: "この症例は典型的な発作期EEG特徴を提示します：\n\n1. リズミカルなスパイク・緩徐波複合（3-5Hz）、主に側頭葉（T3、T4、T5、T6）\n2. 発作伝播：局所から開始、同側半球へ次第に拡大\n3. 振幅は次第に増大、周波数は次第に減速\n4. 発作後びまん性緩除波（post-ictal suppression）が観察可能\n\nこれは発作期パターンを認識するための重要な症例で、臨床EEG解釈にとって極めて重要です。",
-      ko: "이 사례는 전형적인 발작기 EEG 특징을 보여줍니다:\n\n1. 리듬감 있는 첨단-서파 복합체(3-5Hz), 주로 측두엽(T3, T4, T5, T6)\n2. 발작 전파: 국소에서 시작, 동측 반구로 점진적으로 확산\n3. 진폭은 점진적으로 증가, 주파수는 점진적으로 감소\n4. 발작 후 미만성 서파(post-ictal suppression) 관찰 가능\n\n이는 발작기 패턴을 인식하는 데 중요한 사례이며, 임상 EEG 해석에 매우 중요합니다.",
-    },
-    signal_quality: 68,
-    learning_readability_score: 72,
-    beginner_explanation: {
-      zh: "这份 EEG 显示大脑正在经历癫痫发作！可以看到规律的尖波放电，就像大脑在'尖叫'。需要立即医疗关注。",
-      en: "This EEG shows the brain is having a seizure! You can see regular spike discharges, like the brain is 'screaming'. Needs immediate medical attention.",
-    },
-    student_explanation: {
-      zh: "该 EEG 记录显示癫痫发作期的典型特征：1) 颞叶区域 3-5 Hz 节律性尖波-慢波放电；2) 发作从左侧颞叶（T3）开始，逐渐扩散到左侧半球；3) 随着发作进展，频率从 5 Hz 减慢到 3 Hz；4) 发作后可见弥漫性 delta 活动（post-ictal suppression）。这是颞叶癫痫的典型 ictal 图案。",
-      en: "This EEG recording shows typical ictal features of seizure: 1) 3-5 Hz rhythmic spike-and-slow-wave discharges in temporal regions; 2) Seizure starts in left temporal (T3), gradually spreads to left hemisphere; 3) As seizure progresses, frequency slows from 5 Hz to 3 Hz; 4) Post-ictal diffuse delta activity (post-ictal suppression) visible. This is typical ictal pattern of temporal lobe epilepsy.",
-    },
-    research_explanation: {
-      zh: "此 ictal EEG 记录符合颞叶癫痫（TLE）的典型特征。PSD 分析显示 3-5 Hz 能量峰值（发作期放电频率）。Bandpower 分析：Delta 45%，Theta 30%，Alpha 15%，Beta 10%。发作开始时高频活动（Beta/Gamma）增加，随后逐渐被慢波取代。采样率 256 Hz，符合临床 EEG 标准。该案例可用于研究癫痫发作的传播动力学和终止机制。",
-      en: "This ictal EEG recording is consistent with typical features of temporal lobe epilepsy (TLE). PSD analysis shows 3-5 Hz energy peak (ictal discharge frequency). Bandpower analysis: Delta 45%, Theta 30%, Alpha 15%, Beta 10%. High-frequency activity (Beta/Gamma) increases at seizure onset, then gradually replaced by slow waves. Sampling rate 256 Hz, meets clinical EEG standards. This case can be used to study seizure propagation dynamics and termination mechanisms.",
-    },
-    limitations: {
-      zh: ["仅记录单次发作，无法观察发作频率模式", "缺少同步视频记录，无法确认临床症状", "仅覆盖部分头皮区域，可能遗漏远端传播"],
-      en: ["Only single seizure recorded, cannot observe seizure frequency patterns", "No simultaneous video recording, cannot confirm clinical symptoms", "Only covers partial scalp regions, may miss remote propagation"],
-      es: ["Solo se registró una sola crisis, no se pueden observar patrones de frecuencia de crisis", "Sin grabación de video simultánea, no se pueden confirmar síntomas clínicos", "Solo cubre regiones parciales del cuero cabelludo, puede perder propagación remota"],
-      fr: ["Seulement une seule crise enregistrée, impossible d'observer les modèles de fréquence des crises", "Pas d'enregistrement vidéo simultané, impossible de confirmer les symptômes cliniques", "Ne couvre que des régions partielles du cuir chevelu, peut manquer une propagation éloignée"],
-      de: ["Nur ein einzelner Anfall aufgezeichnet, Anfallsfrequenzmuster können nicht beobachtet werden", "Keine gleichzeitige Videoaufzeichnung, klinische Symptome können nicht bestätigt werden", "Deckt nur partielle Schädelregionen ab, ferne Ausbreitung kann übersehen werden"],
-      ja: ["単発の発作のみ記録、発作頻度パターンを観察できない", "同期ビデオ記録がない、臨床症状を確認できない", "頭皮領域の一部のみカバー、遠位伝播を見逃す可能性がある"],
-      ko: ["단일 발작만 기록, 발작 빈도 패턴을 관찰할 수 없음", "동시 비디오 기록 없음, 임상 증상을 확인할 수 없음", "두피 영역 일부만 커버, 원위 전파를 놓칠 수 있음"],
-    },
-    what_this_data_cannot_tell: {
-      zh: ["患者的长期预后", "发作的具体触发因素", "是否需要手术治疗"],
-      en: ["Patient's long-term prognosis", "Specific seizure triggers", "Whether surgical treatment is needed"],
-      es: ["Pronóstico a largo plazo del paciente", "Desencadenantes específicos de la crisis", "Si es necesario el tratamiento quirúrgico"],
-      fr: ["Pronostic à long terme du patient", "Déclencheurs spécifiques de la crise", "Si un traitement chirurgical est nécessaire"],
-      de: ["Langzeitprognose des Patienten", "Spezifische Anfallauslöser", "Ob eine chirurgische Behandlung notwendig ist"],
-      ja: ["患者の長期予後", "具体的な発作誘発因子", "外科的治療が必要かどうか"],
-      ko: ["환자의 장기 예후", "구체적인 발작 유발 요인", "수술적 치료가 필요한지 여부"],
-    },
-    tags: ["seizure", "epilepsy", "temporalLobe", "clinical", "ictal"],
-    readTime: "15 分钟",
-  },
-  /* ---- c10: 睡眠纺锤波 EEG ---- */
-  {
-    id: "c10",
-    title: {
-      zh: "睡眠纺锤波 EEG（Sleep Spindles）",
-      en: "Sleep Spindles EEG",
-      es: "Husos de Sueño EEG",
-      fr: "Fuseaux de Sommeil EEG",
-      de: "Schlafspindeln EEG",
-      ja: "睡眠紡錘波 EEG（Sleep Spindles）",
-      ko: "수면 방추파 EEG (Sleep Spindles)",
-    },
-    categoryKey: "sleep",
-    difficultyKey: "intermediate",
-    description: {
-      zh: "这份 EEG 数据来自一名健康成人在 N2 睡眠阶段（ stage 2）的记录。信号质量评分 82/100，显示典型的睡眠纺锤波（12-16 Hz，持续 0.5-3 秒），主要位于中央区域（C3、C4）。",
-      en: "This EEG data is from a healthy adult during N2 sleep stage (stage 2). Signal quality score 82/100, showing typical sleep spindles (12-16 Hz, lasting 0.5-3 seconds), mainly in central regions (C3, C4).",
-      es: "Estos datos EEG son de un adulto sano durante la etapa de sueño N2 (etapa 2). Puntuación de calidad de señal 82/100, muestra husos de sueño típicos (12-16 Hz, duran 0.5-3 segundos), principalmente en regiones centrales (C3, C4).",
-      fr: "Ces données EEG proviennent d'un adulte sain pendant le stade de sommeil N2 (stade 2). Score de qualité du signal 82/100, montrant des fuseaux de sommeil typiques (12-16 Hz, durant 0,5-3 secondes), principalement dans les régions centrales (C3, C4).",
-      de: "Diese EEG-Daten stammen von einem gesunden Erwachsenen während des N2-Schlafstadiums (Stadium 2). Signalqualitätsscore 82/100, zeigt typische Schlafspindeln (12-16 Hz, dauernd 0,5-3 Sekunden), hauptsächlich in zentralen Regionen (C3, C4).",
-      ja: "このEEGデータは健康な成人のN2睡眠段階（ステージ2）中の記録です。信号品質スコア82/100、典型的な睡眠紡錘波（12-16Hz、0.5-3秒持続）を表示、主に中心領域（C3、C4）。",
-      ko: "이 EEG 데이터는 건강한 성인의 N2 수면 단계(스테이지 2) 중 기록입니다. 신호 품질 점수 82/100, 전형적인 수면 방추파(12-16Hz, 0.5-3초 지속) 표시, 주로 중심 영역(C3, C4).",
-    },
-    details: {
-      zh: "此案例展示 N2 睡眠阶段的典型 EEG 特征——睡眠纺锤波：\n\n1. 纺锤波频率 12-16 Hz（平均 14 Hz），持续时间 0.5-3 秒\n2. 主要位于中央区域（C3、C4），有时扩散到额中央区域\n3. 纺锤波是睡眠纺锤体（由丘脑网状核产生）的标志\n4. 每个纺锤波代表一次丘脑-皮质循环的激活\n\n睡眠纺锤波是睡眠分期的重要指标，也是研究睡眠依赖的记忆巩固的关键窗口。",
-      en: "This case shows typical EEG features of N2 sleep stage — sleep spindles:\n\n1. Spindle frequency 12-16 Hz (average 14 Hz), duration 0.5-3 seconds\n2. Mainly located in central regions (C3, C4), sometimes spreading to centrofrontal regions\n3. Spindles are markers of sleep spindles (generated by thalamic reticular nucleus)\n4. Each spindle represents one thalamocortical oscillatory cycle\n\nSleep spindles are important markers for sleep staging and a key window for studying sleep-dependent memory consolidation.",
-      es: "Este caso muestra características típicas de EEG de la etapa de sueño N2 — husos de sueño:\n\n1. Frecuencia del huso 12-16 Hz (promedio 14 Hz), duración 0.5-3 segundos\n2. Ubicados principalmente en regiones centrales (C3, C4), a veces se extienden a regiones centrofrontales\n3. Los husos son marcadores de husos de sueño (generados por la nucleo reticular talámica)\n4. Cada huso representa un ciclo oscilatorio talamocortical\n\nLos husos de sueño son marcadores importantes para la estratificación del sueño y una ventana clave para estudiar la consolidación de la memoria dependiente del sueño.",
-      fr: "Ce cas montre les caractéristiques typiques d'EEG du stade de sommeil N2 — les fuseaux de sommeil :\n\n1. Fréquence du fuseau 12-16 Hz (moyenne 14 Hz), durée 0,5-3 secondes\n2. Principalement situés dans les régions centrales (C3, C4), parfois s'étendant aux régions centrofrontales\n3. Les fuseaux sont des marqueurs de fuseaux de sommeil (générés par le noyau réticulaire thalamique)\n4. Chaque fuseau représente un cycle oscillatoire thalamocortical\n\nLes fuseaux de sommeil sont des marqueurs importants pour le staging du sommeil et une fenêtre clé pour étudier la consolidation mémorielle dépendante du sommeil.",
-      de: "Dieser Fall zeigt typische EEG-Merkmale des N2-Schlafstadiums — Schlafspindeln:\n\n1. Spindelfrequenz 12-16 Hz (Durchschnitt 14 Hz), Dauer 0,5-3 Sekunden\n2. Hauptsächlich in zentralen Regionen lokalisiert (C3, C4), manchmal Ausbreitung zu zentrofrontalen Regionen\n3. Spindeln sind Marker von Schlafspindeln (generiert vom thalamischen retikulären Kern)\n4. Jede Spindel repräsentiert einen thalamokortikalen oszillatorischen Zyklus\n\nSchlafspindeln sind wichtige Marker für die Schlafstadieneinteilung und ein Schlüsselfenster zum Studium der schlafabhängigen Gedächtniskonsolidierung.",
-      ja: "この症例はN2睡眠段階の典型的なEEG特徴――睡眠紡錘波を提示します：\n\n1. 紡錘波周波数12-16Hz（平均14Hz）、持続時間0.5-3秒\n2. 主に中心領域（C3、C4）に位置、時々中心前野領域に拡散\n3. 紡錘波は睡眠紡錘（視床網様核で生成）のマーカー\n4. 各紡錘波は1回の視床-皮質振動サイクルを表す\n\n睡眠紡錘波は睡眠ステージングの重要なマーカーであり、睡眠依存性記憶固定を研究するための重要な窓口です。",
-      ko: "이 사례는 N2 수면 단계의 전형적인 EEG 특징――수면 방추파를 보여줍니다:\n\n1. 방추파 주파수 12-16Hz(평균 14Hz), 지속 시간 0.5-3초\n2. 주로 중심 영역(C3, C4)에 위치, 때때로 중심전두 영역으로 확산\n3. 방추파는 수면 방추(시상 망상핵에서 생성)의 마커\n4. 각 방추파는 1회의 시상-피질 진동 주기를 나타냄\n\n수면 방추파는 수면 스테이징의 중요한 마커이며, 수면 의존적 기억 공고화를 연구하기 위한 핵심 창입니다.",
-    },
-    signal_quality: 82,
-    learning_readability_score: 85,
-    beginner_explanation: {
-      zh: "这份 EEG 显示大脑在睡觉！可以看到纺锤形状的波形（像纺锤一样），这是深度睡眠的标志。每个纺锤代表大脑在'整理记忆'。",
-      en: "This EEG shows the brain is sleeping! You can see spindle-shaped waves (like a spindle), which is a sign of deep sleep. Each spindle represents the brain 'organizing memories'.",
-    },
-    student_explanation: {
-      zh: "该 EEG 记录显示 N2 睡眠阶段的典型特征：睡眠纺锤波（12-16 Hz，持续 0.5-3 秒）。纺锤波由丘脑网状核产生，通过丘脑-皮质回路传播。主要位于中央区域（C3、C4），有时可扩散到额中央区域。纺锤波密度与睡眠依赖的记忆巩固正相关。此案例适合练习睡眠分期和纺锤波检测。",
-      en: "This EEG recording shows typical features of N2 sleep stage: sleep spindles (12-16 Hz, lasting 0.5-3 seconds). Spindles are generated by the thalamic reticular nucleus and propagate through thalamocortical circuits. Mainly located in central regions (C3, C4), sometimes spreading to centrofrontal regions. Spindle density correlates positively with sleep-dependent memory consolidation. This case is suitable for practicing sleep staging and spindle detection.",
-    },
-    research_explanation: {
-      zh: "此 N2 睡眠 EEG 记录显示密集的纺锤波活动。PSD 分析显示 12-16 Hz 范围内的能量峰值（纺锤波频带）。Bandpower 分析：Sigma（12-16 Hz）18%，Beta 15%，Alpha 10%，Theta 25%，Delta 32%。纺锤波密度约为 4.2 个/分钟，平均持续时间 1.1 秒，平均振幅 35 μV。采样率 256 Hz，符合睡眠 EEG 标准。该案例可用于研究纺锤波与记忆巩固的关系，以及纺锤波在丘脑-皮质网络中的产生机制。",
-      en: "This N2 sleep EEG recording shows dense spindle activity. PSD analysis shows energy peak in 12-16 Hz range (spindle frequency band). Bandpower analysis: Sigma (12-16 Hz) 18%, Beta 15%, Alpha 10%, Theta 25%, Delta 32%. Spindle density approximately 4.2 per minute, average duration 1.1 seconds, average amplitude 35 μV. Sampling rate 256 Hz, meets sleep EEG standards. This case can be used to study the relationship between spindles and memory consolidation, and the generation mechanism of spindles in thalamocortical networks.",
-    },
-    limitations: {
-      zh: ["仅记录单个夜间，无法观察纺锤波的长期变化", "缺少同时采集的 EMG/EOG，无法完全确认睡眠分期", "纺锤波检测依赖算法参数，可能有主观偏差"],
-      en: ["Only single night recorded, cannot observe long-term changes in spindles", "No simultaneous EMG/EOG acquisition, cannot fully confirm sleep staging", "Spindle detection depends on algorithm parameters, may have subjective bias"],
-      es: ["Solo una sola noche registrada, no se pueden observar cambios a largo plazo en husos", "Sin adquisición simultánea de EMG/EOG, no se puede confirmar completamente el estadiaje del sueño", "La detección de husos depende de parámetros del algoritmo, puede tener sesgo subjetivo"],
-      fr: ["Seulement une seule nuit enregistrée, impossible d'observer les changements à long terme des fuseaux", "Pas d'acquisition EMG/EOG simultanée, impossible de confirmer complètement le staging du sommeil", "La détection des fuseaux dépend des paramètres de l'algorithme, peut avoir un biais subjectif"],
-      de: ["Nur eine einzelne Nacht aufgezeichnet, langfristige Veränderungen der Spindeln können nicht beobachtet werden", "Keine gleichzeitige EMG/EOG-Akquisition, Schlafstaging kann nicht vollständig bestätigt werden", "Spindeldetektion hängt von Algorithmusparametern ab, kann subjektive Bias haben"],
-      ja: ["単一夜のみ記録、紡錘波の長期変化を観察できない", "同時EMG/EOG取得がない、睡眠ステージングを完全に確認できない", "紡錘波検出はアルゴリズムパラメータに依存、主観的バイアスがある可能性がある"],
-      ko: ["단일 밤만 기록, 방추파의 장기 변화를 관찰할 수 없음", "동시 EMG/EOG 획득 없음, 수면 스테이징을 완전히 확인할 수 없음", "방추파 검출은 알고리즘 매개변수에 의존, 주관적 편향이 있을 수 있음"],
-    },
-    what_this_data_cannot_tell: {
-      zh: ["梦的内容", "具体的记忆巩固效果", "个体的睡眠质量主观感受"],
-      en: ["Dream content", "Specific memory consolidation effect", "Individual's subjective sleep quality perception"],
-      es: ["Contenido del sueño", "Efecto específico de consolidación de la memoria", "Percepción subjetiva de la calidad del sueño del individuo"],
-      fr: ["Contenu du rêve", "Effet spécifique de consolidation mémorielle", "Perception subjective de la qualité du sommeil de l'individu"],
-      de: ["Trauminhalt", "Spezifischer Gedächtniskonsolidierungseffekt", "Subjektive Schlafqualitätswahrnehmung des Individuums"],
-      ja: ["夢の内容", "具体的な記憶固定効果", "個人の主観的な睡眠品質知覚"],
-      ko: ["꿈의 내용", "구체적인 기억 공고화 효과", "개인의 주관적인 수면 품질 지각"],
-    },
-    tags: ["sleep", "N2", "spindle", "memory", "thalamus"],
-    readTime: "12 分钟",
-  },
-  /* ---- c11: 阿尔茨海默病 EEG ---- */
-  {
-    id: "c11",
-    title: {
-      zh: "阿尔茨海默病 EEG（Alzheimer's EEG）",
-      en: "Alzheimer's Disease EEG",
-      es: "EEG de la Enfermedad de Alzheimer",
-      fr: "EEG de la Maladie d'Alzheimer",
-      de: "EEG bei Alzheimer-Krankheit",
-      ja: "アルツハイマー病EEG（Alzheimer's EEG）",
-      ko: "알츠하이머병 EEG (Alzheimer's EEG)",
-    },
-    categoryKey: "clinical",
-    difficultyKey: "advanced",
-    description: {
-      zh: "这份 EEG 数据来自一名阿尔茨海默病（AD）患者，轻度认知障碍阶段。信号质量评分 72/100，显示典型的 AD EEG 特征：弥漫性 theta 活动增加（4-8 Hz），Alpha 波峰值频率减慢（< 8 Hz），以及前额-颞叶连接性降低。",
-      en: "This EEG data is from an Alzheimer's disease (AD) patient at mild cognitive impairment stage. Signal quality score 72/100, showing typical AD EEG features: increased diffuse theta activity (4-8 Hz), slowed Alpha peak frequency (< 8 Hz), and reduced frontotemporal connectivity.",
-      es: "Estos datos EEG son de un paciente con enfermedad de Alzheimer (EA) en etapa de deterioro cognitivo leve. Puntuación de calidad de señal 72/100, muestra características típicas de EEG de EA: aumento de actividad theta difusa (4-8 Hz), frecuencia de pico Alfa lentificada (< 8 Hz) y conectividad frontotemporal reducida.",
-      fr: "Ces données EEG proviennent d'un patient atteint de la maladie d'Alzheimer (MA) au stade de déficit cognitif léger. Score de qualité du signal 72/100, montrant des caractéristiques typiques d'EEG de la MA : activité theta diffuse augmentée (4-8 Hz), fréquence de pic Alpha ralentie (< 8 Hz) et connectivité frontotemporale réduite.",
-      de: "Diese EEG-Daten stammen von einem Alzheimer-Patienten (AD) im Stadium der leichten kognitiven Beeinträchtigung. Signalqualitätsscore 72/100, zeigt typische AD-EEG-Merkmale: vermehrte diffuse Theta-Aktivität (4-8 Hz), verlangsamte Alpha-Peak-Frequenz (< 8 Hz) und reduzierte frontotemporale Konnektivität.",
-      ja: "このEEGデータはアルツハイマー病（AD）患者、軽度認知障害段階のものです。信号品質スコア72/100、典型的なAD EEG特徴を示します：びまん性シータ活動増加（4-8Hz）、アルファピーク周波数の低下（<8Hz）、および前頭-側頭連結性の低下。",
-      ko: "이 EEG 데이터는 알츠하이머병(AD) 환자, 경도 인지 장애 단계의 것입니다. 신호 품질 점수 72/100, 전형적인 AD EEG 특징 표시: 증가된 미만성 세타 활동(4-8Hz), 느려진 알파 피크 주파수(<8Hz), 그리고 감소된 전두-측두 연결성.",
-    },
-    details: {
-      zh: "此案例展示阿尔茨海默病（AD）早期的典型 EEG 生物标记：\n\n1. Alpha 峰值频率（APF）减慢：从正常的 ~10 Hz 减慢到 < 8 Hz\n2. 弥漫性 theta 活动（4-8 Hz）增加，尤其在额叶和颞叶区域\n3. 脑网络连接性降低：前额-颞叶功能连接减弱\n4. 背景活动整体变慢，delta 活动轻微增加\n\n这些 EEG 特征可用于 AD 的早期识别和疾病进展监测，是神经退行性疾病研究的重要窗口。",
-      en: "This case demonstrates typical EEG biomarkers in early Alzheimer's disease (AD):\n\n1. Alpha peak frequency (APF) slowing: from normal ~10 Hz to < 8 Hz\n2. Increased diffuse theta activity (4-8 Hz), especially in frontal and temporal regions\n3. Reduced brain network connectivity: weakened frontotemporal functional connectivity\n4. Overall background activity slowing, slight delta activity increase\n\nThese EEG features can be used for early AD identification and disease progression monitoring, an important window for neurodegenerative disease research.",
-      es: "Este caso demuestra biomarcadores típicos de EEG en la enfermedad de Alzheimer (EA) temprana:\n\n1. Enlentecimiento de la frecuencia de pico Alfa (APF): de ~10 Hz normal a < 8 Hz\n2. Aumento de actividad theta difusa (4-8 Hz), especialmente en regiones frontales y temporales\n3. Reducción de la conectividad de la red cerebral: conectividad funcional frontotemporal debilitada\n4. Enlentecimiento general de la actividad de fondo, ligero aumento de actividad delta\n\nEstas características de EEG pueden utilizarse para la identificación temprana de EA y el monitoreo de la progresión de la enfermedad, una ventana importante para la investigación de enfermedades neurodegenerativas.",
-      fr: "Ce cas démontre les biomarqueurs typiques d'EEG dans la maladie d'Alzheimer (MA) précoce :\n\n1. Ralentissement de la fréquence de pic Alpha (APF) : de ~10 Hz normal à < 8 Hz\n2. Augmentation de l'activité theta diffuse (4-8 Hz), surtout dans les régions frontales et temporales\n3. Réduction de la connectivité du réseau cérébral : connectivité fonctionnelle frontotemporale affaiblie\n4. Ralentissement général de l'activité de fond, légère augmentation de l'activité delta\n\nCes caractéristiques d'EEG peuvent être utilisées pour l'identification précoce de la MA et le suivi de la progression de la maladie, une fenêtre importante pour la recherche sur les maladies neurodégénératives.",
-      de: "Dieser Fall demonstriert typische EEG-Biomarker bei früher Alzheimer-Krankheit (AD):\n\n1. Alpha-Peak-Frequenz (APF) Verlangsamung: von normal ~10 Hz auf < 8 Hz\n2. Zunahme diffuser Theta-Aktivität (4-8 Hz), besonders in frontalen und temporalen Regionen\n3. Reduzierte Hirnnetzwerk-Konnektivität: geschwächte frontotemporale funktionelle Konnektivität\n4. Generelle Verlangsamung der Hintergrundaktivität, leichter Anstieg der Delta-Aktivität\n\nDiese EEG-Merkmale können für die frühe AD-Identifizierung und Krankheitsprogessionsüberwachung verwendet werden, ein wichtiges Fenster für neurodegenerative Erkrankungsforschung.",
-      ja: "この症例は早期アルツハイマー病（AD）の典型的なEEGバイオマーカーを提示します：\n\n1. アルファピーク周波数（APF）の低下：正常な~10Hzから<8Hzへ\n2. びまん性シータ活動（4-8Hz）の増加、特に前頭および側頭領域\n3. 脳ネットワーク連結性の低下：前頭-側頭機能的連結性の減弱\n4. 全体的な背景活動の低下、デルタ活動の軽度増加\n\nこれらのEEG特徴はADの早期識別および疾患進行モニタリングに使用でき、神経変性疾患研究の重要な窓口です。",
-      ko: "이 사례는 초기 알츠하이머병(AD)의 전형적인 EEG 바이오마커를 보여줍니다:\n\n1. 알파 피크 주파수(APF) 감소: 정상 ~10Hz에서 <8Hz로\n2. 증가된 미만성 세타 활동(4-8Hz), 특히 전두 및 측두 영역\n3. 감소된 뇌 네트워크 연결성: 약화된 전두-측두 기능적 연결성\n4. 전반적인 배경 활동 감소, 경미한 델타 활동 증가\n\n이러한 EEG 특징은 조기 AD 식별 및 질병 진행 모니터링에 사용될 수 있으며, 신경퇴행성 질환 연구의 중요한 창입니다.",
-    },
-    signal_quality: 72,
-    learning_readability_score: 78,
-    beginner_explanation: {
-      zh: "这份 EEG 显示大脑在'变慢'——就像一台老电脑运行变慢一样。阿尔茨海默病让大脑的电活动整体变慢，尤其是 Alpha 波变慢了。",
-      en: "This EEG shows the brain is 'slowing down' — like an old computer running slower. Alzheimer's makes the brain's electrical activity slow down overall, especially Alpha waves slow down.",
-    },
-    student_explanation: {
-      zh: "该 EEG 记录显示阿尔茨海默病早期的神经生理特征：1) Alpha 峰值频率（APF）从 ~10 Hz 减慢到 < 8 Hz；2) 弥漫性 theta 活动（4-8 Hz）增加，尤其在额叶和颞叶；3) 脑网络连接性降低，前额-颞叶功能连接减弱；4) 背景活动整体变慢，delta 活动轻微增加。这些特征与神经元丢失、突触功能下降和神经网络断开一致。此案例适合研究神经退行性疾病的 EEG 生物标记。",
-      en: "This EEG recording shows neurophysiological features of early Alzheimer's disease: 1) Alpha peak frequency (APF) slows from ~10 Hz to < 8 Hz; 2) Increased diffuse theta activity (4-8 Hz), especially in frontal and temporal regions; 3) Reduced brain network connectivity, weakened frontotemporal functional connectivity; 4) Overall background activity slowing, slight delta activity increase. These features are consistent with neuronal loss, synaptic dysfunction, and neural network disconnection. This case is suitable for studying EEG biomarkers in neurodegenerative diseases.",
-    },
-    research_explanation: {
-      zh: "此 AD 患者 EEG 记录显示典型的神经退行性疾病 EEG 特征。PSD 分析显示 Alpha 峰值频率 ~7.8 Hz（正常 ~10 Hz），theta 频带（4-8 Hz）功率增加 35%。Bandpower 分析：Delta 22%，Theta 38%，Alpha 28%，Beta 12%。脑网络分析（基于相位锁定值 PLV）显示前额-颞叶连接性降低 28%。采样率 256 Hz，64 通道 EEG，符合临床神经生理标准。该案例可用于研究 AD 的早期生物标记、疾病进展监测，以及 EEG 生物标记与认知评分（MMSE）的相关性。",
-      en: "This AD patient EEG recording shows typical neurodegenerative disease EEG features. PSD analysis shows Alpha peak frequency ~7.8 Hz (normal ~10 Hz), theta band (4-8 Hz) power increased by 35%. Bandpower analysis: Delta 22%, Theta 38%, Alpha 28%, Beta 12%. Brain network analysis (based on phase locking value PLV) shows reduced frontotemporal connectivity by 28%. Sampling rate 256 Hz, 64-channel EEG, meets clinical neurophysiology standards. This case can be used to study early AD biomarkers, disease progression monitoring, and correlation between EEG biomarkers and cognitive scores (MMSE).",
-    },
-    limitations: {
-      zh: ["仅代表轻度认知障碍阶段，无法观察疾病全程", "缺少脑脊液 biomarkers（Aβ、p-tau）对照", "样本量小（n=1），无法进行群体统计比较"],
-      en: ["Only represents mild cognitive impairment stage, cannot observe full disease course", "Lacks CSF biomarkers (Aβ, p-tau) for comparison", "Small sample size (n=1), cannot perform group statistical comparison"],
-      es: ["Solo representa la etapa de deterioro cognitivo leve, no se puede observar el curso completo de la enfermedad", "Falta biomarcadores de LCR (Aβ, p-tau) para comparación", "Tamaño de muestra pequeño (n=1), no se puede realizar comparación estadística de grupo"],
-      fr: ["Ne représente que le stade de déficit cognitif léger, impossible d'observer toute la progression de la maladie", "Manque de biomarqueurs LCR (Aβ, p-tau) pour comparaison", "Petite taille d'échantillon (n=1), impossible de réaliser une comparaison statistique de groupe"],
-      de: ["Repräsentiert nur das Stadium der leichten kognitiven Beeinträchtigung, kann nicht den gesamten Krankheitsverlauf beobachten", "Fehlen CSF-Biomarker (Aβ, p-tau) zum Vergleich", "Kleine Stichprobengröße (n=1), kann keinen Gruppenstatistikvergleich durchführen"],
-      ja: ["軽度認知障害段階のみを代表、疾患全経過を観察できない", "CSFバイオマーカー（Aβ、p-tau）対照が欠けている", "サンプルサイズ小（n=1）、集団統計比較ができない"],
-      ko: ["경도 인지 장애 단계만 대표, 전체 질병 과정을 관찰할 수 없음", "CSF 바이오마커(Aβ, p-tau) 비교가 없음", "작은 샘플 크기(n=1), 그룹 통계 비교를 수행할 수 없음"],
-    },
-    what_this_data_cannot_tell: {
-      zh: ["具体的病理改变（Aβ斑块、tau缠结）", "个体的疾病进展速度", "治疗效果或药物反应"],
-      en: ["Specific pathological changes (Aβ plaques, tau tangles)", "Individual's disease progression speed", "Treatment effect or drug response"],
-      es: ["Cambios patológicos específicos (placas Aβ, ovillos tau)", "Velocidad de progresión de la enfermedad del individuo", "Efecto del tratamiento o respuesta al fármaco"],
-      fr: ["Changements pathologiques spécifiques (plaques Aβ, enchevêtrements tau)", "Vitesse de progression de la maladie de l'individu", "Effet du traitement ou réponse au médicament"],
-      de: ["Spezifische pathologische Veränderungen (Aβ-Plaques, Tau-Tangles)", "Krankheitsprogressionsgeschwindigkeit des Individuums", "Behandlungseffekt oder Arzneimittelreaktion"],
-      ja: ["具体的な病理変化（Aβプラーク、tauタングル）", "個人の疾患進行速度", "治療効果または薬物反応"],
-      ko: ["구체적인 병리 변화(Aβ 플라크, tau tangles)", "개인의 질병 진행 속도", "치료 효과 또는 약물 반응"],
-    },
-    tags: ["alzheimer", "dementia", "neurodegenerative", "theta", "slowing"],
-    readTime: "18 分钟",
   },
 ];
 const difficultyColor: Record<string, string> = {
@@ -614,6 +798,21 @@ const difficultyColor: Record<string, string> = {
 
 export default function CasesPage() {
   const { lang, t } = useLang();
+  /** 「教育参考案例 + 数据来源」统一文案（自包含七语言） */
+  const src = SRC_L[lang as SrcL] || SRC_L.en;
+  // 来源类型 / 数据状态文案：缺省一律回退到最保守的「教育参考」，绝不猜测来源
+  const sourceTypeText = (v?: SourceType) =>
+    v === "literature" ? src.stLiterature
+      : v === "simulated" ? src.stSimulated
+        : v === "public" ? src.stPublic
+          : v === "unknown" ? src.stUnknown
+            : src.stReference;
+  const dataStatusText = (k?: DataKind) =>
+    k === "illustrative" ? src.dsIllustrative
+      : k === "real" ? src.dsReal
+        : k === "public" ? src.dsPublic
+          : k === "unknown" ? src.dsUnknown
+            : src.dsSimulated;
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>("all");
@@ -757,6 +956,9 @@ export default function CasesPage() {
             const beginnerExp = c.beginner_explanation[lang] || c.beginner_explanation.en || c.beginner_explanation.zh || "";
             const studentExp = c.student_explanation[lang] || c.student_explanation.en || c.student_explanation.zh || "";
             const researchExp = c.research_explanation[lang] || c.research_explanation.en || c.research_explanation.zh || "";
+            const limitations = c.limitations[lang] || c.limitations.en || c.limitations.zh || [];
+            const cannotTell = c.what_this_data_cannot_tell[lang] || c.what_this_data_cannot_tell.en || c.what_this_data_cannot_tell.zh || [];
+            const sourceNote = c.source ? (c.source[lang] || c.source.en || c.source.zh || "") : "";
 
             return (
               <motion.div
@@ -790,6 +992,16 @@ export default function CasesPage() {
                       <h3 className="text-sm font-bold text-[var(--color-text)] leading-snug">{title}</h3>
                       {/* 简介 */}
                       <p className="text-xs text-[var(--color-text-secondary)] mt-1.5 line-clamp-2">{description}</p>
+                      {/* 真实数据来源标识（列表态即显示：读者与搜索引擎都能看到来源真实可查） */}
+                      {c.dataset && (
+                        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]">
+                          <Database className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">
+                            {c.dataset[lang] || c.dataset.en || c.dataset.zh}
+                            {c.recordRef ? ` · ${c.recordRef}` : ""}
+                          </span>
+                        </p>
+                      )}
                     </div>
                     {/* 展开/折叠箭头 */}
                     <div className="pt-1">
@@ -813,6 +1025,7 @@ export default function CasesPage() {
                       className="overflow-hidden"
                     >
                       <div className="px-5 pb-5 space-y-6 border-t border-[var(--color-border)]">
+
                         {/* 详细描述 */}
                         <div className="pt-4">
                           <h4 className="text-xs font-bold text-[var(--color-text-secondary)] mb-2">{t("caseDetails")}</h4>
@@ -836,6 +1049,7 @@ export default function CasesPage() {
                             </div>
                           </div>
                         </div>
+
 
                         {/* 三层 AI 解释 */}
                         <div>
@@ -868,6 +1082,48 @@ export default function CasesPage() {
                           </div>
                         </div>
 
+                        {/* 局限与不可推断项（教育透明度：让读者知道这些数据不说明什么） */}
+                        {(limitations.length > 0 || cannotTell.length > 0) && (
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            {limitations.length > 0 && (
+                              <div>
+                                <h4 className="text-xs font-bold text-[var(--color-text-secondary)] mb-2">
+                                  {src.limitationsTitle}
+                                </h4>
+                                <ul className="space-y-1.5">
+                                  {limitations.map((x, k) => (
+                                    <li
+                                      key={k}
+                                      className="flex gap-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                                    >
+                                      <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-[var(--color-text-secondary)]" />
+                                      <span>{x}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {cannotTell.length > 0 && (
+                              <div>
+                                <h4 className="text-xs font-bold text-[var(--color-text-secondary)] mb-2">
+                                  {src.cannotTellTitle}
+                                </h4>
+                                <ul className="space-y-1.5">
+                                  {cannotTell.map((x, k) => (
+                                    <li
+                                      key={k}
+                                      className="flex gap-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                                    >
+                                      <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-[var(--color-text-secondary)]" />
+                                      <span>{x}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* 标签 */}
                         <div className="flex flex-wrap gap-1.5">
                           {c.tags.map((tag) => (
@@ -884,6 +1140,72 @@ export default function CasesPage() {
                             </button>
                           ))}
                         </div>
+
+                        {/* Source Information（统一来源区域，置于案例详情底部） */}
+                        <div>
+                          <h4 className="text-xs font-bold text-[var(--color-text-secondary)] mb-2">{src.heading}</h4>
+                          {sourceNote && (
+                            <p className="mb-2 text-xs leading-relaxed text-[var(--color-text-secondary)]">{sourceNote}</p>
+                          )}
+                          <dl className="divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)]">
+                            {[
+                              { label: src.labelSourceType, value: sourceTypeText(c.sourceType), emphasis: true },
+                              // 数据集来源：c1–c4 绑定 CHB-MIT Scalp EEG Database（PhysioNet，ODC-By 1.0），
+                              //   c5–c8 绑定 OpenNeuro ds004504（CC0 1.0）。全部为公开、可下载、可核实的数据集。
+                              //   注意：新增案例必须提供真实可核实的 dataset 字段并在此声明许可与出处，
+                              //   严禁编造数据集名称；缺失时按下方逻辑回退为“暂缺”。
+                              {
+                                label: src.labelDataset,
+                                value: c.dataset
+                                  ? c.dataset[lang] || c.dataset.en || c.dataset.zh || src.unavailable
+                                  : src.unavailable,
+                              },
+                              // 文献引用：各案例均给出可核实的原始论文 / DOI（Guttag 2010 doi:10.13026/C2K01R；
+                              //   Miltiadous et al. 2023 doi:10.3390/data8060095）。新增案例必须附真实文献，
+                              //   严禁编造引用；缺失时回退为“待核实”。
+                              {
+                                label: src.labelCitation,
+                                value: c.citation
+                                  ? c.citation[lang] || c.citation.en || c.citation.zh || src.pending
+                                  : src.pending,
+                              },
+                              // 许可：CHB-MIT 为 ODC-By 1.0（要求署名），ds004504 为 CC0。
+                              // ODC-By 的核心义务就是署名，因此许可必须显式展示。
+                              {
+                                label: src.labelLicense,
+                                value: c.license || src.unavailable,
+                              },
+                              {
+                                label: src.labelRecordingType,
+                                value: c.recordingType
+                                  ? c.recordingType[lang] || c.recordingType.en || c.recordingType.zh || src.rtIllustrative
+                                  : src.rtIllustrative,
+                              },
+                              { label: src.labelDataStatus, value: dataStatusText(c.dataKind) },
+                            ].map((row) => (
+                              <div
+                                key={row.label}
+                                className="flex flex-col gap-1 px-3 py-2 sm:flex-row sm:items-baseline sm:gap-3"
+                              >
+                                <dt className="w-28 flex-shrink-0 text-xs font-medium text-[var(--color-text-secondary)]">
+                                  {row.label}
+                                </dt>
+                                <dd
+                                  className={`text-xs leading-relaxed ${
+                                    row.emphasis
+                                      ? "font-semibold text-[var(--color-text)]"
+                                      : "text-[var(--color-text-secondary)]"
+                                  }`}
+                                >
+                                  {row.value}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
+
+                        {/* 真实数据可验证：直接分析本案例附带的真实公开数据集片段 */}
+                        <AnalyzeCasePanel caseId={c.id} />
                       </div>
                     </motion.div>
                   )}

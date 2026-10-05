@@ -702,14 +702,45 @@ def _summarize_for_ai(a: Dict) -> Dict:
     literacy = a.get("literacy_scores") or a.get("eeg_literacy_scores") or {}
     qd       = sq.get("quality_details") or {}
     trans    = qd.get("transient_activity") or {}
+
+    _dur = (overview.get("recording_duration_seconds") or a.get("recording_duration_seconds")
+            or a.get("duration_seconds")
+            or _parse_duration_seconds(overview.get("duration"))
+            or _parse_duration_seconds(a.get("duration")))
+
+    # ── 预计算所有「派生量」，禁止模型自己做算术 ─────────────────────────
+    # 背景：research 层原本要求模型写出「alpha 是 theta 的 4.1 倍」这类跨频段比值。
+    # qwen2.5-7b 这类小模型做多位数除法/加法时经常算错（算式幻觉），
+    # 于是这里把派生量在 Python 侧算准后直接放进 JSON，并在 prompt 中
+    # 明确要求「只能照抄这些字段，不得自行乘除加减」。
+    _abs_raw = (fa.get("average_bandpower") or a.get("average_bandpower") or {})
+    abs_bp = {}
+    for _k, _v in _abs_raw.items():
+        _fv = _pct(_v)
+        if _fv is not None and _fv > 0:
+            abs_bp[str(_k).lower()] = float(_fv)
+
+    # 跨频段倍数：以绝对功率最大的频段（= 主导频段）为分子
+    band_ratios = {}
+    if len(abs_bp) >= 2:
+        _dom = max(abs_bp, key=lambda kk: abs_bp[kk])
+        for _k, _v in abs_bp.items():
+            if _k == _dom:
+                continue
+            band_ratios["%s_over_%s" % (_dom, _k)] = round(abs_bp[_dom] / _v, 2)
+
+    # 频段百分比合计（用于「占比是否自洽」这类判断，避免模型自己加 4 个数）
+    _bp_pct = (fa.get("bandpower_percent") or a.get("bandpower_percent") or {})
+    _pct_vals = [v for v in (_pct(x) for x in _bp_pct.values()) if v is not None]
+
     return {
         "channel_count":            overview.get("channel_count") or a.get("channel_count"),
         "sampling_rate":            overview.get("sampling_rate") or a.get("sampling_rate"),
         "duration":                 overview.get("duration") or a.get("duration"),
-        "duration_seconds":         overview.get("recording_duration_seconds") or a.get("recording_duration_seconds")
-                                    or a.get("duration_seconds")
-                                    or _parse_duration_seconds(overview.get("duration"))
-                                    or _parse_duration_seconds(a.get("duration")),
+        "duration_seconds":         _dur,
+        # 频率分辨率 = 1 / 记录时长（秒）。模型自己做 1/182 这类除法很容易出错，
+        # 也可能把「预览窗口 10 秒」误当成记录时长 ⇒ 一律由后端算好。
+        "frequency_resolution_hz":  (round(1.0 / float(_dur), 4) if isinstance(_dur, (int, float)) and float(_dur) > 0 else None),
         "signal_quality_score":     _rnd(sq.get("signal_quality_score") or a.get("signal_quality_score"), 3),
         # 只保留前若干项，避免超长通道列表
         "noisy_channels":           (sq.get("noisy_channels") or a.get("noisy_channels") or [])[:20],
@@ -726,10 +757,15 @@ def _summarize_for_ai(a: Dict) -> Dict:
             "channels": trans.get("channels") or 0,
         } if trans else None,
         # 频段只用聚合百分比 / 均值（已经是 5 个 key 的字典），丢弃逐通道 bandpower 数组；数值顺手截位
-        "bandpower_percent":        {k: _rnd(v, 1) for k, v in (fa.get("bandpower_percent") or a.get("bandpower_percent") or {}).items()},
-        "average_bandpower":        {k: _rnd(v, 2) for k, v in (fa.get("average_bandpower") or a.get("average_bandpower") or {}).items()},
+        "bandpower_percent":        {k: _rnd(v, 1) for k, v in _bp_pct.items()},
+        "average_bandpower":        {k: _rnd(v, 2) for k, v in _abs_raw.items()},
+        # 预计算派生量（模型只能引用，不得自算）
+        "bandpower_ratios":         band_ratios or None,
+        "bandpower_percent_sum":    (round(sum(_pct_vals), 1) if _pct_vals else None),
         "dominant_frequency":       _rnd(fa.get("dominant_frequency") or a.get("dominant_frequency"), 2),
         "dominant_band":            fa.get("dominant_band") or a.get("dominant_band"),
+        "dominant_band_abs_power":  (round(abs_bp.get(str(fa.get("dominant_band") or "").lower()), 2)
+                                     if abs_bp and fa.get("dominant_band") else None),
         "literacy_scores":          {k: _rnd(v, 3) if isinstance(v, (int, float)) else v for k, v in literacy.items()},
         "file_size_mb":             _rnd(a.get("file_size_mb"), 2),
         "what_this_data_cannot_tell": a.get("what_this_data_cannot_tell"),
@@ -802,6 +838,17 @@ def _build_prompt(a: Dict, level: str, lang: str) -> str:
         "12. RECORDING LENGTH: whenever you mention how long the recording is, use the exact number in "
         "'duration_seconds' from the JSON (e.g. 182) — never 10, 20, or any preview-window length, "
         "and never a value you inferred. 'duration' is the human-readable form of the same value.\n"
+        "12b. NEVER do your own arithmetic. Every derived number you may need is PRE-COMPUTED in the JSON: "
+        "'bandpower_ratios' (cross-band power multiples of the dominant band, keyed like '<band>_over_<band>'), "
+        "'frequency_resolution_hz' (= 1 / duration_seconds), 'bandpower_percent_sum', and "
+        "'dominant_band_abs_power'. Quote those fields VERBATIM. Do NOT multiply, divide, add, subtract, "
+        "average, or otherwise re-derive any number yourself — not even 'about half'. "
+        "If the number you want is not in the JSON, describe it qualitatively or omit it instead of computing it. "
+        "When you phrase a ratio, insert the ACTUAL value from bandpower_ratios — never a number you invented "
+        "and never any example number that appears in these instructions.\n"
+        "12c. 中文同样禁止自行做算术。所有派生数值（跨频段倍数 bandpower_ratios、频率分辨率 frequency_resolution_hz、"
+        "频段百分比合计 bandpower_percent_sum、主导频段绝对功率 dominant_band_abs_power）都已在 JSON 中预先算好，"
+        "必须原样引用，不得自行乘除加减、不得重新推算、不得估算。JSON 里没有的数就不要写，改成定性描述。\n"
         "13. VALUE OVER FORM: this explanation must be genuinely USEFUL to the reader, not a parameter dump. "
         "Do not merely restate JSON numbers; interpret what they MEAN for this recording. Every tier must: "
         "(a) state the single most important observation about this recording (what stands out most, with its real number); "
@@ -971,7 +1018,8 @@ def _build_prompt(a: Dict, level: str, lang: str) -> str:
         f"You MUST write EXACTLY three paragraphs — 段落1：频谱主导与绝对功率；段落2：方法学局限（频率分辨率等）；段落3：质量与下游处理。 "
         f"Each paragraph is mandatory; merging or skipping any paragraph is a FAILURE. "
         f"LENGTH: cover every required item below. Keep it DENSE and SHORT — every sentence carries a real number "
-        f"(a %, a μV²/Hz value, a computed ratio, a Hz resolution) or a precise technical judgment about THIS recording. "
+        f"(a %, a μV²/Hz value, a ratio taken verbatim from bandpower_ratios, a Hz resolution taken verbatim from "
+        f"frequency_resolution_hz) or a precise technical judgment about THIS recording. "
         f"A sentence with neither is invalid text — delete it. A short complete answer is better than a long padded one. "
         f"No filler, no generic methodology notes.\n\n"
         f"KILL RULES — delete any sentence that:\n"
@@ -983,9 +1031,11 @@ def _build_prompt(a: Dict, level: str, lang: str) -> str:
         f"  (c) is a hedge with no number behind it.\n\n"
         f"PARAGRAPH 1 — Dominant spectral finding & absolute power (4-5 sentences): "
         f"Open with the dominant band and its real percentage from bandpower_percent. Then use average_bandpower "
-        f"(absolute power, μV²/Hz) to QUANTIFY dominance as exact ratios computed from the real values "
-        f"(e.g., 'alpha power is 4.1× theta and 3.2× beta'), comparing the dominant band against EACH other band "
-        f"with its own real value. Assess how physiological (1/f-like) the spectral profile is and how far it deviates. "
+        f"(absolute power, μV²/Hz) together with the PRE-COMPUTED 'bandpower_ratios' object to QUANTIFY dominance "
+        f"as exact cross-band multiples (e.g. if bandpower_ratios contains alpha_over_theta, write "
+        f"'alpha power is <that value>× theta'). Copy those ratio values VERBATIM — they are already computed for you; "
+        f"never recompute or re-derive a ratio yourself. Cover the dominant band against EACH other band that has "
+        f"an entry in bandpower_ratios. Assess how physiological (1/f-like) the spectral profile is and how far it deviates. "
         f"Gamma, if present in the JSON, should be included in the ratios; if gamma is absent or zero "
         f"(low sampling rate limits gamma assessment), note that in ONE clause and move on — do not invent a gamma value. "
         f"Then INTERPRET the profile physiologically in cautious professional terms: what awake/alert, relaxed, or drowsy "
@@ -1003,9 +1053,12 @@ def _build_prompt(a: Dict, level: str, lang: str) -> str:
         f"instead state that the recording shows no obvious abnormal tendency. "
         f"NEVER frame it as a diagnosis of this recording.\n\n"
         f"PARAGRAPH 2 — Methodological limits that actually bind THIS data (3-4 sentences): "
-        f"State only the constraints that are REAL for this recording, quantified (frequency resolution "
-        f"from duration, e.g. '3 min ⇒ ~0.01 Hz resolution, adequate for band ratios; 20 s ⇒ ~0.05 Hz, "
-        f"coarse for alpha-peak fitting'). Say which analysis types this data CAN support vs where it "
+        f"State only the constraints that are REAL for this recording, quantified. Use the PRE-COMPUTED "
+        f"'frequency_resolution_hz' field directly as the resolution value (it equals 1 / duration_seconds) — "
+        f"do NOT compute 1/duration yourself, and never substitute a preview-window length for duration_seconds. "
+        f"Phrase it as 'duration_seconds = <its value> s ⇒ frequency_resolution_hz ≈ <its value> Hz, ...' "
+        f"using ONLY the two numbers that are actually present in the JSON "
+        f"(e.g. adequate for band ratios but coarse for alpha-peak fitting). Say which analysis types this data CAN support vs where it "
         f"falls short — with the numbers justifying it.\n\n"
         f"PARAGRAPH 3 — Quality, downstream safety & handling (3-4 sentences): "
         f"Report the quality score, noisy-channel count (category only), and artifacts/clipping/high-freq "
@@ -1032,11 +1085,11 @@ def _build_prompt(a: Dict, level: str, lang: str) -> str:
         f"- You MAY and SHOULD use technical terminology: PSD, bandpower, artifacts, Nyquist, montage, SNR.\n"
         f"- DIFFERENTIATION: the Student tier already reports the plain percentage breakdown (e.g., 'delta 28.5%, alpha 45.8%') "
         f"and the frequencies of each band. Do NOT repeat that summary here. This Research tier must go DEEPER: "
-        f"absolute power (μV²/Hz), exact cross-band ratios computed from the numbers, quantified methodological limits "
-        f"(frequency resolution from duration), and ONE concrete actionable finding. If a sentence only restates a percentage "
+        f"absolute power (μV²/Hz), exact cross-band ratios quoted from bandpower_ratios, quantified methodological limits "
+        f"(frequency_resolution_hz from duration), and ONE concrete actionable finding. If a sentence only restates a percentage "
         f"that the Student tier would show, replace it with the absolute-power or ratio version.\n"
-        f"- EVERY sentence must carry at least one quantified value from the JSON (a %, a μV²/Hz value, a computed ratio, "
-        f"a Hz resolution, a channel count) OR a precise technical judgment about THIS recording. "
+        f"- EVERY sentence must carry at least one quantified value from the JSON (a %, a μV²/Hz value, a ratio from "
+        f"bandpower_ratios, a Hz resolution from frequency_resolution_hz, a channel count) OR a precise technical judgment about THIS recording. "
         f"A sentence with neither is invalid text — delete it.\n"
         f"- NEVER define terms (bandpower, sampling rate, PSD, Nyquist…). The reader is a researcher.\n"
         f"- NO meta sentences, NO concluding summary ('综上所述' / '总体来看' / '总之'), NO disclaimers, NO advice.\n"

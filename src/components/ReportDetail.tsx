@@ -5,6 +5,8 @@ import { formatDuration } from "@/lib/duration";
 import { StoredReport } from "@/lib/reports-storage";
 import AIExplanation from "@/components/AIExplanation";
 import FrequencyChart from "@/components/FrequencyChart";
+import ReportBandPanel from "@/components/ReportBandPanel";
+import ReportDataExplorer from "@/components/ReportDataExplorer";
 
 import {
   FileText, Activity, BarChart3, Brain, TrendingUp,
@@ -47,7 +49,6 @@ export default function ReportDetail({ report }: { report: StoredReport }) {
   const sqColor = Number(sq) >= 70 ? "text-emerald-600 dark:text-emerald-400" :
                   Number(sq) >= 50 ? "text-yellow-600 dark:text-yellow-400" :
                   "text-red-600 dark:text-red-400";
-  const bandpowerPercent = (analysis as any).bandpower_percent || (freqAnalysis as any).bandpower_percent || {};
 
   return (
     <div id="report-detail-content" className="mx-auto max-w-4xl space-y-6 sm:space-y-8 px-4 sm:px-6 py-4 sm:py-8 pb-[env(safe-area-inset-bottom,16px)]">
@@ -265,23 +266,8 @@ export default function ReportDetail({ report }: { report: StoredReport }) {
           </div>
           <h2 className="text-base font-bold text-[var(--color-text)]">{t("frequencyAnalysis")}</h2>
         </div>
-        {/* Bandpower 百分比概览 */}
-        {Object.keys(bandpowerPercent).length > 0 && (
-          <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {[
-              { key: "alpha", bandKey: "bandAlpha", color: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400" },
-              { key: "beta", bandKey: "bandBeta", color: "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400" },
-              { key: "delta", bandKey: "bandDelta", color: "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400" },
-              { key: "theta", bandKey: "bandTheta", color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/30 dark:text-yellow-400" },
-              { key: "gamma", bandKey: "bandGamma", color: "bg-purple-100 text-purple-700 dark:bg-purple-950/30 dark:text-purple-400" },
-            ].map(({ key, bandKey, color }) => (
-              <div key={key} className={`rounded-xl px-4 py-3 text-center ${color}`}>
-                <div className="text-lg font-bold">{(bandpowerPercent as any)[key] || "0%"}</div>
-                <div className="text-[10px] font-medium uppercase tracking-wider">{t(bandKey)}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Bandpower 频段交互面板（可点击展开功率与解释） */}
+        <ReportBandPanel analysis={analysis} />
         <FrequencyChart frequencyData={freqAnalysis} />
       </section>
 
@@ -311,6 +297,8 @@ export default function ReportDetail({ report }: { report: StoredReport }) {
           <h2 className="text-base font-bold text-[var(--color-text)]">{t("aiExplanation")}</h2>
         </div>
         <AIExplanation data={analysis as any} />
+        {/* Research 级原始数据增强（展示层，不伪造字段） */}
+        <ReportDataExplorer analysis={analysis} />
       </section>
 
       {/* ── Section 6: Signal Quality Hint ──────────── */}

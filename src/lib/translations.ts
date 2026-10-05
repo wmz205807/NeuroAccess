@@ -3,6 +3,7 @@ export type Lang = "zh" | "en" | "es" | "fr" | "de" | "ja" | "ko";
 
 export const translations: Record<Lang, Record<string, string>> = {
   zh: {
+    howItWorks: "工作原理",
     "downloadData": "下载 EEG 数据",
     "downloadDataDesc": "选择适合你的学习包开始下载",
     "packBeginner": "入门学习",
@@ -142,7 +143,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "PDF 导出失败：",
     popupBlocked: "请允许浏览器弹窗以导出 PDF，或在地址栏点击允许弹窗后重试。",
 
-    publicPreviewText: "Public Preview — 本平台为 EEG 科普教育展示版，不构成医疗建议、诊断或治疗推荐。上传文件仅用于演示，不保存于服务器。",
+    publicPreviewText: "Public Preview — 本平台为 EEG 科普教育展示版，不构成医疗建议、诊断或治疗推荐。上传的文件仅用于本次分析，分析结束后立即删除，服务器不做长期保存。",
     apiMode: "API 模式",
     chinese: "中文",
     english: "EN",
@@ -482,7 +483,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "分析完成时通知",
     privacyPolicy: "隐私政策",
     lastUpdated: "最后更新：",
-    lastUpdatedDate: "最后更新：2026年5月29日",
+    lastUpdatedDate: "最后更新：2026年10月3日",
     allRightsReserved: "保留所有权利。",
     termsOfService: "服务条款",
     inviteCode: "学校邀请码（选填）",
@@ -493,7 +494,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "版本",
     projectPositioning: "项目定位",
     projectDescription: "EEG 科普教育平台",
-    projectDescLong: "NeuroAccess 是一个面向EEG初学者的科普教育工具，帮助理解脑电图数据的基本概念。本平台不提供医疗诊断建议。",
+    projectDescLong: "NeuroAccess 是一个面向EEG初学者的科普教育工具，帮助理解脑电图数据的基本概念。",
     replayIntro: "重播启动动画",
     clearAllData: "清除所有数据",
     clearDataConfirm: "确定要清除所有报告和数据吗？此操作不可恢复。",
@@ -517,6 +518,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "登录",
     noAccount: "没有账号？",
     loginHint: "登录后将自动跳转",
+    continueAsGuest: "以游客身份浏览",
+    continueAsGuestHint: "游客可浏览分析与学习内容，报告功能需登录。",
     phone: "手机号",
     phonePlaceholder: "请输入手机号",
     phoneRequired: "请输入手机号",
@@ -936,6 +939,7 @@ export const translations: Record<Lang, Record<string, string>> = {
   // English (en)
   // ─────────────────────────────────────────────
   en: {
+    howItWorks: "How It Works",
     "downloadData": "Download EEG Data",
     "downloadDataDesc": "Choose a learning pack to download",
     "packBeginner": "Beginner",
@@ -1060,7 +1064,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "PDF export failed: ",
     popupBlocked: "Please allow browser popup to export PDF, or click allow in address bar and retry.",
 
-    publicPreviewText: "Public Preview — This platform is for EEG education demonstration only. Not medical advice, diagnosis, or treatment. Uploaded files are processed locally and not stored on server.",
+    publicPreviewText: "Public Preview — This platform is for EEG education demonstration only. Not medical advice, diagnosis, or treatment. Uploaded files are used only for the analysis and are deleted immediately afterwards; nothing is retained long-term on the server.",
     apiMode: "API Mode",
     chinese: "中文",
     english: "EN",
@@ -1405,7 +1409,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "Notify when analysis complete",
     privacyPolicy: "Privacy Policy",
     lastUpdated: "Last updated: ",
-    lastUpdatedDate: "Last updated: May 29, 2026",
+    lastUpdatedDate: "Last updated: October 3, 2026",
     allRightsReserved: "All rights reserved.",
     termsOfService: "Terms of Service",
     inviteCode: "School invite code (optional)",
@@ -1416,7 +1420,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "Version",
     projectPositioning: "Project Positioning",
     projectDescription: 'EEG Education Platform',
-    projectDescLong: "NeuroAccess is an educational tool for EEG beginners, helping to understand the basics of electroencephalogram data. This platform does not provide medical diagnostic advice.",
+    projectDescLong: "NeuroAccess is an educational tool for EEG beginners, helping to understand the basics of electroencephalogram data.",
     replayIntro: "Replay Intro",
     clearAllData: "Clear All Data",
     clearDataConfirm: "Are you sure you want to delete all reports and data? This action cannot be undone.",
@@ -1440,6 +1444,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "Login",
     noAccount: "Don't have an account?",
     loginHint: "You will be redirected after logging in",
+    continueAsGuest: "Continue as guest",
+    continueAsGuestHint: "Guests can browse analysis and learning content; reports require an account.",
     phone: "Phone",
     phonePlaceholder: "Enter your phone number",
     phoneRequired: "Please enter your phone number",
@@ -1875,6 +1881,7 @@ export const translations: Record<Lang, Record<string, string>> = {
   // Spanish (es)
   // ─────────────────────────────────────────────
   es: {
+    howItWorks: "Cómo funciona",
     "downloadData": "Descargar datos EEG",
     "downloadDataDesc": "Elige un paquete de aprendizaje para descargar",
     "packBeginner": "Principiante",
@@ -2002,7 +2009,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "Error al exportar PDF: ",
     popupBlocked: "Por favor permita las ventanas emergentes para exportar PDF, o haga clic en permitir en la barra de direcciones y reintente.",
 
-    publicPreviewText: "Public Preview — Esta plataforma es solo para demostración educativa de EEG. No es consejo médico, diagnóstico o tratamiento. Los archivos subidos se procesan localmente y no se almacenan en el servidor.",
+    publicPreviewText: "Public Preview — Esta plataforma es solo para demostración educativa de EEG. No es consejo médico, diagnóstico o tratamiento. Los archivos subidos se utilizan únicamente para el análisis y se eliminan inmediatamente después; no se conserva nada a largo plazo en el servidor.",
     apiMode: "Modo API",
     chinese: "Chino",
     english: "EN",
@@ -2321,7 +2328,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "Notificar al completar el análisis",
     privacyPolicy: "Política de Privacidad",
     lastUpdated: "Última actualización: ",
-    lastUpdatedDate: "Última actualización: 29 de mayo de 2026",
+    lastUpdatedDate: "Última actualización: 3 de octubre de 2026",
     allRightsReserved: "Todos los derechos reservados.",
     termsOfService: "Términos de Servicio",
     inviteCode: "Código de invitación (opcional)",
@@ -2332,7 +2339,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "Versión",
     projectPositioning: "Posicionamiento del Proyecto",
     projectDescription: "Plataforma de Educación EEG",
-    projectDescLong: "NeuroAccess es una herramienta educativa para principiantes en EEG, ayudando a comprender los conceptos básicos de los datos de electroencefalograma. Esta plataforma no proporciona consejos de diagnóstico médico.",
+    projectDescLong: "NeuroAccess es una herramienta educativa para principiantes en EEG, ayudando a comprender los conceptos básicos de los datos de electroencefalograma.",
     replayIntro: "Repetir Introducción",
     clearAllData: "Borrar Todos los Datos",
     clearDataConfirm: "¿Estás seguro de que quieres eliminar todos los informes y datos? Esta acción no se puede deshacer.",
@@ -2356,6 +2363,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "Iniciar sesión",
     noAccount: "¿No tiene cuenta?",
     loginHint: "Será redirigido después de iniciar sesión",
+    continueAsGuest: "Continuar como invitado",
+    continueAsGuestHint: "Los invitados pueden explorar el análisis y el contenido educativo; los informes requieren una cuenta.",
     phone: "Teléfono",
     phonePlaceholder: "Ingrese su número de teléfono",
     phoneRequired: "Ingrese su número de teléfono",
@@ -2791,6 +2800,7 @@ export const translations: Record<Lang, Record<string, string>> = {
   // French (fr)
   // ─────────────────────────────────────────────
   fr: {
+    howItWorks: "Fonctionnement",
     "downloadData": "Télécharger les données EEG",
     "downloadDataDesc": "Choisissez un pack d'apprentissage à télécharger",
     "packBeginner": "Débutant",
@@ -2918,7 +2928,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "Échec de l'exportation PDF : ",
     popupBlocked: "Veuillez autoriser les fenêtres pop-up pour exporter le PDF, ou cliquez sur autoriser dans la barre d'adresse et réessayez.",
 
-    publicPreviewText: "Public Preview — Cette plateforme est uniquement pour la démonstration éducative d'EEG. Pas de conseil médical, diagnostic ou traitement. Les fichiers téléversés sont traités localement et ne sont pas stockés sur le serveur.",
+    publicPreviewText: "Public Preview — Cette plateforme est uniquement destinée à la démonstration éducative de l'EEG. Pas de conseil médical, diagnostic ou traitement. Les fichiers téléversés ne servent qu'à l'analyse et sont supprimés immédiatement après ; rien n'est conservé à long terme sur le serveur.",
     apiMode: "Mode API",
     chinese: "Chinois",
     english: "EN",
@@ -3237,7 +3247,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "Notifier à la fin de l'analyse",
     privacyPolicy: "Politique de Confidentialité",
     lastUpdated: "Dernière mise à jour : ",
-    lastUpdatedDate: "Dernière mise à jour : 29 mai 2026",
+    lastUpdatedDate: "Dernière mise à jour : 3 octobre 2026",
     allRightsReserved: "Tous droits réservés.",
     termsOfService: "Conditions d'Utilisation",
     inviteCode: "Code d'invitation (optionnel)",
@@ -3248,7 +3258,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "Version",
     projectPositioning: "Positionnement du Projet",
     projectDescription: "Plateforme Éducative d'EEG",
-    projectDescLong: "NeuroAccess est un outil éducatif pour les débutants en EEG, aidant à comprendre les bases des données d'électroencéphalogramme. Cette plateforme ne fournit pas de conseils de diagnostic médical.",
+    projectDescLong: "NeuroAccess est un outil éducatif pour les débutants en EEG, aidant à comprendre les bases des données d'électroencéphalogramme.",
     replayIntro: "Rejouer l'Introduction",
     clearAllData: "Effacer Toutes les Données",
     clearDataConfirm: "Êtes-vous sûr de vouloir supprimer tous les rapports et données? Cette action ne peut pas être annulée.",
@@ -3272,6 +3282,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "Connexion",
     noAccount: "Pas de compte ?",
     loginHint: "Vous serez redirigé après connexion",
+    continueAsGuest: "Continuer en tant qu'invité",
+    continueAsGuestHint: "Les invités peuvent parcourir l'analyse et le contenu éducatif ; les rapports nécessitent un compte.",
     phone: "Téléphone",
     phonePlaceholder: "Entrez votre numéro de téléphone",
     phoneRequired: "Entrez votre numéro de téléphone",
@@ -3707,6 +3719,7 @@ export const translations: Record<Lang, Record<string, string>> = {
   // German (de)
   // ─────────────────────────────────────────────
   de: {
+    howItWorks: "Funktionsweise",
     "downloadData": "EEG-Daten herunterladen",
     "downloadDataDesc": "Wähle ein Lernpaket zum Herunterladen",
     "packBeginner": "Anfänger",
@@ -3834,7 +3847,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "PDF-Export fehlgeschlagen: ",
     popupBlocked: "Bitte erlauben Sie Browser-Popups zum PDF-Export, oder klicken Sie auf erlauben in der Adressleiste und versuchen Sie es erneut.",
 
-    publicPreviewText: "Public Preview — Diese Plattform dient nur der EEG-Bildungsdemonstration. Keine ärztliche Ratschläge, Diagnose oder Behandlung. Hochgeladene Dateien werden lokal verarbeitet und nicht auf dem Server gespeichert.",
+    publicPreviewText: "Public Preview — Diese Plattform dient nur der EEG-Bildungsdemonstration. Kein medizinischer Rat, keine Diagnose und keine Behandlung. Hochgeladene Dateien werden nur für die Analyse verwendet und unmittelbar danach gelöscht; auf dem Server wird nichts dauerhaft gespeichert.",
     apiMode: "API-Modus",
     chinese: "Chinesisch",
     english: "EN",
@@ -4153,7 +4166,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "Bei Analyse-Abschluss benachrichtigen",
     privacyPolicy: "Datenschutzrichtlinie",
     lastUpdated: "Letzte Aktualisierung: ",
-    lastUpdatedDate: "Letzte Aktualisierung: 29. Mai 2026",
+    lastUpdatedDate: "Letzte Aktualisierung: 3. Oktober 2026",
     allRightsReserved: "Alle Rechte vorbehalten.",
     termsOfService: "Nutzungsbedingungen",
     inviteCode: "Einladungscode (optional)",
@@ -4164,7 +4177,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "Version",
     projectPositioning: "Projektpositionierung",
     projectDescription: "EEG-Bildungsplattform",
-    projectDescLong: "NeuroAccess ist ein Bildungswerkzeug für EEG-Anfänger, das hilft, die Grundlagen von Elektroenzephalogramm-Daten zu verstehen. Diese Plattform bietet keine medizinische Diagnoseberatung.",
+    projectDescLong: "NeuroAccess ist ein Bildungswerkzeug für EEG-Anfänger, das hilft, die Grundlagen von Elektroenzephalogramm-Daten zu verstehen.",
     replayIntro: "Intro Wiederholen",
     clearAllData: "Alle Daten Löschen",
     clearDataConfirm: "Sind Sie sicher, dass Sie alle Berichte und Daten löschen wollen? Diese Aktion kann nicht rückgängig gemacht werden.",
@@ -4188,6 +4201,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "Anmelden",
     noAccount: "Kein Konto?",
     loginHint: "Sie werden nach dem Login weitergeleitet",
+    continueAsGuest: "Als Gast fortfahren",
+    continueAsGuestHint: "Gäste können Analyse- und Lerninhalte durchsuchen; Berichte erfordern ein Konto.",
     phone: "Telefon",
     phonePlaceholder: "Geben Sie Ihre Telefonnummer ein",
     phoneRequired: "Geben Sie Ihre Telefonnummer ein",
@@ -4623,6 +4638,7 @@ export const translations: Record<Lang, Record<string, string>> = {
   // Japanese (ja)
   // ─────────────────────────────────────────────
   ja: {
+    howItWorks: "仕組み",
     "downloadData": "EEG データをダウンロード",
     "downloadDataDesc": "ダウンロードする学習パッケージを選択",
     "packBeginner": "入門",
@@ -4750,7 +4766,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "PDFエクスポート失敗：",
     popupBlocked: "PDFをエクスポートするためにブラウザのポップアップを許可してください。またはアドレスバーで許可をクリックして再試行してください。",
 
-    publicPreviewText: "Public Preview — 本プラットフォームはEEG教育デモンストレーション専用です。医療アドバイス、診断、または治療ではありません。アップロードされたファイルはローカルで処理され、サーバーに保存されません。",
+    publicPreviewText: "Public Preview — 本プラットフォームはEEG教育デモンストレーション専用です。医療アドバイス、診断、または治療ではありません。アップロードされたファイルは解析のみに使用され、解析終了後ただちに削除されます。サーバーに長期的に保存されることはありません。",
     apiMode: "APIモード",
     chinese: "中国語",
     english: "EN",
@@ -5069,7 +5085,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "分析完了時に通知",
     privacyPolicy: "プライバシーポリシー",
     lastUpdated: "最終更新：",
-    lastUpdatedDate: "最終更新：2026年5月29日",
+    lastUpdatedDate: "最終更新：2026年10月3日",
     allRightsReserved: "全著作権予約。",
     termsOfService: "利用規約",
     inviteCode: "学校の招待コード（任意）",
@@ -5080,7 +5096,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "バージョン",
     projectPositioning: "プロジェクトの位置づけ",
     projectDescription: "EEG教育プラットフォーム",
-    projectDescLong: "NeuroAccessは、EEG初心者向けの教育ツールで、脳波データの基本概念を理解するのに役立ちます。このプラットフォームは医療診断のアドバイスを提供しません。",
+    projectDescLong: "NeuroAccessは、EEG初心者向けの教育ツールで、脳波データの基本概念を理解するのに役立ちます。",
     replayIntro: "イントロ再再生",
     clearAllData: "すべてのデータをクリア",
     clearDataConfirm: "すべてのレポートとデータを削除してもよろしいですか？この操作は元に戻せません。",
@@ -5104,6 +5120,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "ログイン",
     noAccount: "アカウントをお持ちでないですか？",
     loginHint: "ログイン後にリダイレクトされます",
+    continueAsGuest: "ゲストとして続ける",
+    continueAsGuestHint: "ゲストは分析と学習コンテンツを閲覧できます。レポートにはアカウントが必要です。",
     phone: "電話番号",
     phonePlaceholder: "電話番号を入力してください",
     phoneRequired: "電話番号を入力してください",
@@ -5539,6 +5557,7 @@ export const translations: Record<Lang, Record<string, string>> = {
   // Korean (ko)
   // ─────────────────────────────────────────────
   ko: {
+    howItWorks: "작동 방식",
     "downloadData": "EEG 데이터 다운로드",
     "downloadDataDesc": "다운로드할 학습 패키지를 선택하세요",
     "packBeginner": "입문",
@@ -5666,7 +5685,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     pdfExportFailed: "PDF 내보내기 실패: ",
     popupBlocked: "PDF를 내보내기 위해 브라우저 팝업을 허용하거나, 주소 표시줄에서 허용을 클릭하고 다시 시도하십시오.",
 
-    publicPreviewText: "Public Preview — 이 플랫폼은 EEG 교육 데모용입니다. 의료 조언, 진단 또는 치료가 아닙니다. 업로드된 파일은 로컬에서 처리되며 서버에 저장되지 않습니다.",
+    publicPreviewText: "Public Preview — 이 플랫폼은 EEG 교육 데모용입니다. 의료 조언, 진단 또는 치료가 아닙니다. 업로드된 파일은 분석에만 사용되며 분석이 끝나면 즉시 삭제됩니다. 서버에 장기간 보관되지 않습니다.",
     apiMode: "API 모드",
     chinese: "중국어",
     english: "EN",
@@ -5985,7 +6004,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     analysisCompleteNotify: "분석 완료 시 알림",
     privacyPolicy: "개인정보 보호정책",
     lastUpdated: "최종 업데이트：",
-    lastUpdatedDate: "최종 업데이트: 2026년 5월 29일",
+    lastUpdatedDate: "최종 업데이트: 2026년 10월 3일",
     allRightsReserved: "모든 권리 보유.",
     termsOfService: "서비스 이용약관",
     inviteCode: "학교 초대 코드(선택)",
@@ -5996,7 +6015,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     version: "버전",
     projectPositioning: "프로젝트 포지셔닝",
     projectDescription: "EEG 교육 플랫폼",
-    projectDescLong: "NeuroAccess는 EEG 초보자를 위한 교육 도구로, 뇌파 데이터의 기본 개념을 이해하는 데 도움을 줍니다. 이 플랫폼은 의료 진단 조언을 제공하지 않습니다.",
+    projectDescLong: "NeuroAccess는 EEG 초보자를 위한 교육 도구로, 뇌파 데이터의 기본 개념을 이해하는 데 도움을 줍니다.",
     replayIntro: "인트로 다시 재생",
     clearAllData: "모든 데이터 지우기",
     clearDataConfirm: "모든 리포트와 데이터를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
@@ -6020,6 +6039,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     loginButton: "로그인",
     noAccount: "계정이 없으신가요?",
     loginHint: "로그인 후 리디렉트됩니다",
+    continueAsGuest: "게스트로 계속하기",
+    continueAsGuestHint: "게스트는 분석 및 학습 콘텐츠를 둘러볼 수 있으며, 보고서는 계정이 필요합니다.",
     phone: "전화번호",
     phonePlaceholder: "전화번호를 입력하세요",
     phoneRequired: "전화번호를 입력하세요",

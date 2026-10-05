@@ -95,45 +95,25 @@ export function buildWaveformSvg(analysis: any, page = 0): string {
   // 波形偏窄、占不满区域；统一固定宽度后，短文件波形自动横向拉伸铺满。
   const PLOT_W = 1300;
   const W = LW + PLOT_W + 15;
-  const laneH = 34;  // 固定通道高度（标准做法），多通道整图变高纵向滚动
-  const H = laneH * nch + 30;
+  // laneH 只决定相邻通道"基线的行距"，不再限制波形自身的上下幅度。
+  const laneH = 34;
+  const svg: string[] = [];
 
-  const svg: string[] = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="background:#1a1a2e;font-family:monospace">`,
-  ];
-
-  // 朴素直接渲染：每个横向像素列取列内中位值（仅性能降采样，忠实反映数据）
+  // 朴素直接渲染：每个横向像素列取列内偏离最大的样本（仅性能降采样，忠实反映数据）
   const LINE_COLOR = "#38bdf8";
   const renderValsFor = (nm: string): number[] => winChs[nm] as number[];
   const nvRef = renderValsFor(chNames[0]).length;
   if (nvRef < 2) return "";
   // 列数不能超过当前窗口实际数据点数，否则大量列重复同一点 → 水平线/大斜线
   const COLS = Math.max(2, Math.min(Math.min(PLOT_W, 1200), nvRef));
-  // 全局振幅基准：所有通道合并 p90，所有通道共用同一缩放（保留真实振幅差异）
-  const allAbs: number[] = [];
-  for (const nm of chNames) { const vv = renderValsFor(nm); for (const v of vv) allAbs.push(Math.abs(v)); }
-  allAbs.sort((a, b) => a - b);
-  const GLOBAL_REF = allAbs[Math.min(Math.round(allAbs.length * 0.9), allAbs.length - 1)] || 1;
-  const scBase = (laneH * 0.5) / GLOBAL_REF;
-  // 波形完全如实显示，不压缩；超出通道的伪影由 clipPath 自然裁掉（真实削波）
-  // 每通道 clipPath：大尖峰超出 lane 被如实削顶（不溢出相邻通道）
-  svg.push("<defs>");
-  for (let ci = 0; ci < nch; ci++) svg.push(`<clipPath id="c${ci}"><rect x="0" y="${ci * laneH}" width="${W}" height="${laneH}"/></clipPath>`);
-  svg.push("</defs>");
-  for (let i = 0; i < nch; i++) {
-    const ch = chNames[i];
-    const y = i * laneH + laneH / 2;
-    svg.push(
-      `<line x1="${LW}" y1="${y}" x2="${W}" y2="${y}" stroke="#333" stroke-width="0.5" stroke-dasharray="3 3"/>`
-    );
-    svg.push(
-      `<text x="${LW - 4}" y="${y + 3}" fill="#aab" font-size="${Math.min(11, Math.max(8, Math.round(200 / nch)))}" text-anchor="end">${esc(ch)}</text>`
-    );
-    const vals = renderValsFor(ch);
-    if (!vals || vals.length < 2) continue;
-    const sc = scBase;  // 全局统一缩放（保留真实振幅差异）
-    // 每像素列取一个代表点：选列内"偏离基线最远"的样本（保留尖峰方向与幅度），
-    // 按时间顺序连成真实波形线（不再画 min/max 竖直包络，避免假"填充块"观感）。
+
+  // ── 第一遍：逐通道按列抽点，先拿到"实际会被画出来的点" ──
+  // 每列取"偏离列内中点最远"的样本（保留尖峰方向与幅度），按时间顺序连成真实波形线
+  // （不画 min/max 竖直包络，避免假"填充块"观感）。
+  const drawn: { xs: number[]; ys: number[] }[] = [];
+  for (const nm of chNames) {
+    const vals = renderValsFor(nm);
+    if (!vals || vals.length < 2) { drawn.push({ xs: [], ys: [] }); continue; }
     const nv = vals.length;
     const step = nv / COLS;
     const xs: number[] = [], ys: number[] = [];
@@ -141,25 +121,59 @@ export function buildWaveformSvg(analysis: any, page = 0): string {
       const s = Math.floor(j * step);
       const e = Math.min(Math.floor((j + 1) * step), nv);
       if (e <= s) continue;
-      // 列内基线（中位）作为参考，取偏离最大的点（保留正负尖峰）
-      let base = vals[s];
-      const m = (s + e) >> 1;
-      base = vals[m];
+      const base = vals[(s + e) >> 1];
       let best = s, bestAbs = -1;
       for (let k = s; k < e; k++) {
         const a = Math.abs(vals[k] - base);
         if (a > bestAbs) { bestAbs = a; best = k; }
       }
-      const x = LW + (j + 0.5) / COLS * PLOT_W;
-      xs.push(x);
+      xs.push(LW + (j + 0.5) / COLS * PLOT_W);
       ys.push(vals[best]);
     }
-    // 真实波形线：按时间顺序连接代表点（尖峰如实保留，呈现真实 EEG 形态）
-    if (xs.length > 1) {
-      let d = `M${xs[0].toFixed(1)},${(y - ys[0] * sc).toFixed(2)}`;
-      for (let j = 1; j < xs.length; j++) d += ` L${xs[j].toFixed(1)},${(y - ys[j] * sc).toFixed(2)}`;
-      svg.push(`<path d="${d}" stroke="${LINE_COLOR}" stroke-width="1.0" fill="none" opacity="0.9" clip-path="url(#c${i})"/>`);
+    drawn.push({ xs, ys });
+  }
+
+  // ── 全局振幅基准：用"实际画出来的点"的 p95 ──
+  // 每列取的是列内最极端样本，抽样后的点本身就偏极端；若仍按原始样本的 p90 定标，
+  // 会有远超 10% 的点触顶变成平顶。按抽样点自身取 p95，触顶比例才可控。
+  const allAbs: number[] = [];
+  for (const dd of drawn) for (const v of dd.ys) allAbs.push(Math.abs(v));
+  if (allAbs.length < 2) return "";
+  allAbs.sort((a, b) => a - b);
+  const GLOBAL_REF = allAbs[Math.min(Math.round(allAbs.length * 0.95), allAbs.length - 1)] || 1;
+  // 0.45：p95 幅值落在通道行距的 ±45% 处，正常波形之间留出可见间隔；
+  // 超过这个幅度的尖峰不再被削平，按真实高度画出去。
+  const scBase = (laneH * 0.45) / GLOBAL_REF;
+
+  // 画布上下留白：保证最上/最下通道的超幅尖峰也不会被画布本身截断
+  let maxOff = 0;
+  for (const dd of drawn) for (const v of dd.ys) { const o = Math.abs(v) * scBase; if (o > maxOff) maxOff = o; }
+  const PAD = Math.max(Math.round(laneH * 0.9), Math.ceil(maxOff - laneH / 2) + 6);
+  const H = laneH * nch + PAD * 2 + 30;
+  svg.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="background:#1a1a2e;font-family:monospace">`);
+  // 渲染策略（2026-10-04 定案）：
+  //   ① 早先每通道套一个 laneH 高的 clipPath —— 折线一旦有连续几点整体落在框外，
+  //      那一段连线就整段不可见 ⇒ 波形"断口"（尖峰越宽断口越长）。
+  //   ② 后来改成钳位画平顶，等于用一条假直线把尖峰盖掉，观感同样不真实。
+  //   两者都不要：波形按真实幅度自由伸展，尖峰该多高就多高，需要时自然压到相邻
+  //   通道上（EDFbrowser / MNE 也是这么画的），只有通道中心那条虚线作为基准线。
+  for (let i = 0; i < nch; i++) {
+    const ch = chNames[i];
+    const y = PAD + i * laneH + laneH / 2;
+    svg.push(
+      `<line x1="${LW}" y1="${y}" x2="${W}" y2="${y}" stroke="#333" stroke-width="0.5" stroke-dasharray="3 3"/>`
+    );
+    svg.push(
+      `<text x="${LW - 4}" y="${y + 3}" fill="#aab" font-size="${Math.min(11, Math.max(8, Math.round(200 / nch)))}" text-anchor="end">${esc(ch)}</text>`
+    );
+    const { xs, ys } = drawn[i];
+    if (xs.length < 2) continue;
+    const sc = scBase;  // 全局统一缩放（保留各通道真实振幅差异）
+    let d = `M${xs[0].toFixed(1)},${(y - ys[0] * sc).toFixed(2)}`;
+    for (let j = 1; j < xs.length; j++) {
+      d += ` L${xs[j].toFixed(1)},${(y - ys[j] * sc).toFixed(2)}`;
     }
+    svg.push(`<path d="${d}" stroke="${LINE_COLOR}" stroke-width="1.0" fill="none" opacity="0.9"/>`);
   }
 
   // 底部时间条背景

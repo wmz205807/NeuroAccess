@@ -10,6 +10,7 @@ import math
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 import concurrent.futures
+import asyncio
 import json
 import hashlib
 import threading
@@ -68,6 +69,41 @@ def _cache_explanations(aid: str, data: Dict):
 # 模块加载时恢复上次进程的 AI 文案缓存（后端重启不丢）
 _load_explanations_cache_from_disk()
 
+# =====================================================================
+# 分析进度上报（真实分步进度）
+# ---------------------------------------------------------------------
+# 背景：/api/analyze 是「一次请求跑完整个分析」，前端在整个请求期间只能显示
+#       一根假进度条，用户看不出「现在在做什么」。
+# 做法：前端发请求时带一个 progress_id（复用 report_id），后端在真实阶段边界
+#       写入本表；前端并发轮询 /api/analysis/progress/{id} 读取真实阶段。
+# 注意：只上报「阶段名」，不伪造百分比；百分比由前端按阶段权重线性插值展示。
+# =====================================================================
+_PROGRESS_STORE: Dict[str, Dict[str, Any]] = {}
+_PROGRESS_LOCK = threading.Lock()
+_PROGRESS_TTL = 900  # 15 分钟未更新即视为过期，下次写入时顺带清理
+
+def _set_progress(pid: Optional[str], stage: str, analysis_id: Optional[str] = None, error: Optional[str] = None):
+    """记录某个 progress_id 的当前真实阶段。任何异常都不得影响分析主流程。"""
+    if not pid:
+        return
+    try:
+        with _PROGRESS_LOCK:
+            now = _time.time()
+            # 顺带清理过期条目，避免内存无限增长
+            if len(_PROGRESS_STORE) > 200:
+                for k in [k for k, v in _PROGRESS_STORE.items() if now - v.get("ts", 0) > _PROGRESS_TTL]:
+                    _PROGRESS_STORE.pop(k, None)
+            cur = _PROGRESS_STORE.get(pid) or {"started": now}
+            cur["stage"] = stage
+            cur["ts"] = now
+            if analysis_id:
+                cur["analysis_id"] = analysis_id
+            if error:
+                cur["error"] = error
+            _PROGRESS_STORE[pid] = cur
+    except Exception:
+        pass
+
 # ── 验证码发送防重限流（内存级，比 DB 快）─────────────────
 _code_rate_limit: Dict[str, float] = {}
 _code_rate_lock = threading.Lock()
@@ -85,6 +121,20 @@ def _check_code_rate_limit(key: str, cooldown_sec: int = 3) -> bool:
             return False  # 仍在冷却期，拒绝
         _code_rate_limit[key] = now
         return True
+
+# =====================================================================
+# 统一非医疗说明（7 语言）—— 报告页与示例分析都要带上，避免出现"报告看起来像诊断"的误读
+# =====================================================================
+NON_MEDICAL_DISCLAIMER = {
+    "zh": "本报告仅用于 EEG 科普教育。NeuroAccess 面向教育与 EEG 素养，不是医疗诊断工具。EEG 数据不能单独用于诊断任何疾病。如有健康问题，请咨询专业医生。",
+    "en": "This report is for EEG educational purposes only. NeuroAccess is designed for education and EEG literacy. It is not a medical diagnostic tool. EEG data alone cannot diagnose any disease. For health concerns, consult a qualified physician.",
+    "es": "Este informe es solo para fines educativos de EEG. NeuroAccess está diseñado para la educación y la alfabetización en EEG. No es una herramienta de diagnóstico médico. Los datos de EEG por sí solos no pueden diagnosticar ninguna enfermedad. Si tiene inquietudes de salud, consulte a un médico cualificado.",
+    "fr": "Ce rapport est uniquement destiné à l'éducation à l'EEG. NeuroAccess est conçu pour l'éducation et la littératie en EEG. Ce n'est pas un outil de diagnostic médical. Les données EEG seules ne permettent pas de diagnostiquer une maladie. En cas de préoccupation de santé, consultez un médecin qualifié.",
+    "de": "Dieser Bericht dient ausschließlich der EEG-Bildung. NeuroAccess ist für Bildung und EEG-Kompetenz gedacht und kein medizinisches Diagnosewerkzeug. EEG-Daten allein können keine Krankheit diagnostizieren. Bei gesundheitlichen Bedenken wenden Sie sich an eine qualifizierte Ärztin oder einen qualifizierten Arzt.",
+    "ja": "本レポートはEEG教育のみを目的としています。NeuroAccessは教育とEEGリテラシーのためのツールであり、医療診断ツールではありません。EEGデータ単独で病気を診断することはできません。健康上の懸念がある場合は、専門医にご相談ください。",
+    "ko": "이 보고서는 EEG 교육 목적으로만 제공됩니다. NeuroAccess는 교육과 EEG 리터러시를 위한 도구이며 의료 진단 도구가 아닙니다. EEG 데이터만으로는 어떤 질병도 진단할 수 없습니다. 건강에 대한 우려가 있으면 전문 의료인과 상담하십시오.",
+}
+
 
 def _bg_generate_explanations(aid: str, enhanced: Dict, lang: str, report_payload=None):
     """后台线程：生成 AI 解释并存入缓存；解释完成后把报告落库（含全分辨率波形）。
@@ -205,11 +255,15 @@ def _fw_client_ip(request: Request) -> str:
 def _fw_group(path: str) -> str:
     if path.startswith("/api/auth/"):
         return "auth"
-    if path == "/api/analyze" or path == "/api/explain":
-        # 两者都是昂贵接口（文件分析 / 最长180s的AI生成）→ 严一点防滥用
+    if (path == "/api/analyze" or path == "/api/explain" or path == "/api/try-sample"
+            or path == "/api/cases/analyze"):
+        # 都是昂贵接口（文件分析 / 最长180s的AI生成 / 示例分析 / 案例分析）→ 严一点防滥用
         return "upload"
     if path.startswith("/api/analysis/explanations/") or path.startswith("/api/analysis/explanation/"):
         # 前端轮询 3s×60 次 → 必须宽松
+        return "poll"
+    if path.startswith("/api/analysis/progress/"):
+        # 分析期间前端高频轮询（~600ms）读取真实阶段 → 与 AI 解释轮询同组，必须宽松
         return "poll"
     return "default"
 
@@ -479,15 +533,10 @@ def root():
 @app.get("/api/health")
 @app.get("/health")  # 兼容旧版健康检查
 def health():
-    try:
-        from explanations import call_openrouter
-    except Exception:
-        return {"success": False, "error": "explanations module failed to import"}
-    try:
-        test_resp = call_openrouter("ping", timeout=10)
-        openrouter_ok = test_resp.get("success") == True
-    except Exception:
-        openrouter_ok = False
+    # 修复：不再实时调用 OpenRouter（外部 API 偶发 >5s 时 /health 超时，
+    # health-check 只等 5s → 误判后端死亡 → 重启 → 正在生成的报告丢失）。
+    # 只检查 key 是否配置 + 分析引擎是否可用，毫秒级返回。
+    openrouter_ok = bool(os.getenv("OPENROUTER_API_KEY"))
     return {"success": True, "ollama": openrouter_ok, "openrouter": openrouter_ok,
             "analysis_available": analyze_edf is not None}
 
@@ -535,8 +584,44 @@ def require_user_id(request: Request):
     return uid
 
 
-def _downsample_waveform_preview(wp, target_pts=800):
-    """Downsample waveform_preview time series to shrink /api/analyze JSON (avoid 6MB blob freezing the frontend).
+def optional_user_id(request: Request):
+    """FastAPI 依赖（游客可用端点专用）：有有效 token → 返回 uid；无 token/无效 → 返回 None。
+
+    与 require_user_id 的区别：绝不抛 401。用于「无需登录即可体验」的功能
+    （例如游客分析示例 EEG）：游客拿到完整分析体验，但不落库、不绑定账户。
+    """
+    if not AUTH_AVAILABLE:
+        return None
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    try:
+        payload = verify_token(auth_header.split(" ", 1)[1])
+        if not payload or "sub" not in payload:
+            return None
+        uid = int(payload["sub"])
+        if not get_user_by_id(uid):
+            return None
+        return uid
+    except Exception:
+        return None
+
+
+def _downsample_waveform_preview(wp, target_pts=800, pts_per_sec=120, byte_budget=1500000):
+    """Downsample waveform_preview time series to shrink /api/analyze JSON.
+
+    `target_pts` is a FLOOR, not a cap. A fixed 800-point cap is duration-blind and
+    ruined long recordings: a 55 s clip @256 Hz collapsed to 14.5 Hz effective, and
+    the client (>=1200 vertices per 10 s page, see buildWaveformSvg COLS) could only
+    draw ~133 vertices across 1300 px — a bare polyline that looks nothing like EEG.
+    Scale the budget with duration instead (~120 pts/s matches the client's 1200
+    vertices/page ceiling), bounded by a JSON byte budget (~9 B per sample as
+    serialized) so the payload stays in the same ballpark as the old worst case.
+
+    Values are also rounded to 3 decimals: the raw float64 output of analysis.py
+    serialises as 19-char numbers ("-123.45678901234567"), which tripled the payload
+    for no visible benefit — buildWaveformSvg renders with toFixed(2).
+
     Full-resolution waveform stays in DB, read by /api/waveform-image (SVG) endpoint."""
     if not wp or not isinstance(wp, dict):
         return wp
@@ -545,10 +630,23 @@ def _downsample_waveform_preview(wp, target_pts=800):
     n = len(times)
     if n <= target_pts or not chs:
         return wp
-    step = n / target_pts
-    idxs = [min(n - 1, int(round(i * step))) for i in range(target_pts)]
-    new_times = [times[i] for i in idxs]
-    new_chs = {name: [vals[i] for i in idxs] for name, vals in chs.items()}
+    nch = max(1, len(chs))
+    try:
+        dur = float(wp.get("duration_seconds") or 0) or 0.0
+    except Exception:
+        dur = 0.0
+    want = int(round(dur * pts_per_sec)) if dur > 0 else target_pts
+    budget = max(target_pts, int(byte_budget / (9.0 * nch)))
+    keep = max(target_pts, min(want, budget, 20000))
+    if n > keep:
+        step = n / keep
+        idxs = [min(n - 1, int(round(i * step))) for i in range(keep)]
+        new_times = [round(times[i], 6) for i in idxs]
+        new_chs = {name: [round(vals[i], 3) for i in idxs] for name, vals in chs.items()}
+    else:
+        # 点数已足够：不抽稀，只压缩数值精度（纯显示用途，客户端按 toFixed(2) 画）
+        new_times = [round(t, 6) for t in times]
+        new_chs = {name: [round(v, 3) for v in vals] for name, vals in chs.items()}
     out = dict(wp)
     out["times"] = new_times
     out["channels"] = new_chs
@@ -556,7 +654,7 @@ def _downsample_waveform_preview(wp, target_pts=800):
 
 
 @app.post("/api/analyze")
-async def analyze(file: UploadFile = File(...), language: str = Form("zh"), report_id: str = Form(None), current_user_id: int = Depends(require_user_id)):
+async def analyze(file: UploadFile = File(...), language: str = Form("zh"), report_id: str = Form(None), progress_id: str = Form(None), current_user_id: Optional[int] = Depends(optional_user_id)):
     """
     快速分析 EDF 文件（v2.0）
     - 不调用 Ollama AI
@@ -566,35 +664,55 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
     - 超时：60s（ThreadPoolExecutor）
 
     返回：overview + signal_quality + frequency_analysis + waveform_preview
+
+    分步进度：客户端可传 progress_id（通常复用 report_id），随后轮询
+    GET /api/analysis/progress/{progress_id} 读取真实阶段名。
     """
     # ── Auth（AUTH 启用时必须登录；关闭时游客可分析，便于本地开发）──
     # 鉴权由 Depends(require_user_id) 在解析请求体（Form/File）之前完成：无 token/账号已注销 → 401
-    
+
+    # 进度上报用的 key：优先 progress_id，其次 report_id（前端两者通常相同）
+    pid = progress_id or report_id
+
     # ── 保存文件 ─────────────────────────────────────────────────
     lang = normalize_language(language)
+    _set_progress(pid, "receiving")          # 服务器已收完上传字节，正在落盘
     saved = save_upload(file, lang)
     file_path = saved.get("path")
     file_name = saved.get("file_name", "unknown")
     
     if not saved.get("success"):
+        _set_progress(pid, "error", error=saved.get("error", "Unknown error"))
         return {"success": False, "file_name": file.filename or "unknown",
                 "error": saved.get("error", "Unknown error")}
     
     try:
         if analyze_edf is None:
+            _set_progress(pid, "error", error="analyze_edf not available")
             return {"success": False, "file_name": file_name,
                     "error": f"analyze_edf not available: {ANALYSIS_IMPORT_ERROR}"}
         
         # ── 分析（60s 超时）──────────────────────────────────────
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            future = pool.submit(analyze_edf, file_path, lang)
-            try:
-                raw_result = future.result(timeout=60)
-            except concurrent.futures.TimeoutError:
-                return {"success": False, "file_name": file_name,
-                        "error": "Analysis timed out (60s). File may be too large or corrupted."}
+        # 修复：不能用 future.result() 同步等待 —— 那会阻塞整个事件循环
+        # （/health 5s 超时 → health-check 重启后端 → AI 解释线程被杀 → 报告丢失）。
+        try:
+            raw_result = await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: analyze_edf(
+                        file_path, lang,
+                        progress_cb=(lambda st: _set_progress(pid, st)),
+                    ),
+                ),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            _set_progress(pid, "error", error="Analysis timed out (60s)")
+            return {"success": False, "file_name": file_name,
+                    "error": "Analysis timed out (60s). File may be too large or corrupted."}
         
         # ── 增强输出 ─────────────────────────────────────────────
+        _set_progress(pid, "report")         # 汇总：质量评分 / 素养评分 / 概览
         enhanced = enhance_analysis(raw_result, lang)
         
         # ── 模板解释（立即可用）──────────────────────────────────
@@ -610,15 +728,14 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
         # ── 生成 analysis_id（供 /explain 轮询）──────────────────
         analysis_id = hashlib.md5((file_path + str(_time.time())).encode()).hexdigest()[:12]
         _cache_explanations(analysis_id, {"explanations": None, "ready": False})
+        # 让前端能顺带拿到 analysis_id（用于 AI 解释轮询），同时把阶段推进到"报告已生成"
+        _set_progress(pid, "report", analysis_id=analysis_id)
         
         analysis_out = {
             **enhanced,
             "explanations": template_explanations,
             "analysis_id": analysis_id,
-            "disclaimer": {
-                "zh": "本报告仅用于 EEG 科普教育。不构成医疗建议、诊断或治疗推荐。EEG 数据不能单独用于诊断任何疾病。如有健康问题，请咨询专业医生。",
-                "en": "This report is for EEG educational purposes only. It does not constitute medical advice, diagnosis, or treatment recommendations. EEG data alone cannot diagnose any disease. For health concerns, consult a qualified physician."
-            },
+            "disclaimer": NON_MEDICAL_DISCLAIMER,
             "file_size_mb": saved.get("file_size_mb", 0) or raw_result.get("file_size_mb", 0),
         }
         
@@ -663,19 +780,28 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
         except Exception as _se:
             print("[analyze] report payload build skipped:", _se)
 
+        # 游客（无账户）不落库：清掉 payload，AI 解释仍生成并可轮询，
+        # 但报告只存在于本次会话（前端提示 "Create an account to save this report"）。
+        if not current_user_id:
+            _report_payload = None
+
         # ── 后台异步生成 AI 解释（完成后自动落库）──────────────
+        _set_progress(pid, "ai", analysis_id=analysis_id)
         threading.Thread(target=_bg_generate_explanations,
                         args=(analysis_id, enhanced, lang, _report_payload), daemon=True).start()
 
         # 响应只回传降采样后的波形预览（~800 点/通道），大幅减小 JSON 体积
         resp_analysis = dict(analysis_out)
         resp_analysis["waveform_preview"] = _downsample_waveform_preview(analysis_out.get("waveform_preview"), 800)
-        return {"success": True, "file_name": file_name, "analysis": resp_analysis}
+        return {"success": True, "file_name": file_name, "analysis": resp_analysis,
+                "guest": not bool(current_user_id)}
         
     except ValueError as e:
+        _set_progress(pid, "error", error=str(e))
         return {"success": False, "file_name": file_name, "error": str(e)}
     except Exception as e:
         import traceback
+        _set_progress(pid, "error", error=f"Internal server error: {str(e)}")
         return {"success": False, "file_name": file_name,
                 "error": f"Internal server error: {str(e)}",
                 "detail": traceback.format_exc() if os.getenv("DEBUG") else "Enable DEBUG=1 for details"}
@@ -688,9 +814,343 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
 
 
 # =================================================================
+# 游客体验：示例 EEG（Sample EEG）—— 无需登录即可跑完整分析
+# 说明：只读取 backend/samples/ 下的固定文件，不接受用户上传；
+#       游客分析结果不落库（不写 reports 表），只保留内存缓存供轮询。
+# =================================================================
+SAMPLES_DIR = os.path.join(BASE_DIR, "samples")
+
+# 每项只放「事实性」信息：文件名/通道数/采样率/时长/来源/许可。
+# 面向用户的多语言名称与说明由前端展示层负责（后端不编造医学标签）。
+SAMPLE_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "clean": {
+        "id": "clean",
+        "file": "sample_clean_alpha_8ch.edf",
+        "channels": 8, "sampling_rate": 250, "duration_sec": 20.0,
+        "kind": "synthetic",
+        "source": "Synthetic — generated by the NeuroAccess EEG simulator",
+        "license": "CC0 1.0 (synthetic data, no rights reserved)",
+        "recording": "8 channels · 250 Hz · 20 s · eyes-closed alpha rhythm, minimal noise",
+    },
+    "noisy": {
+        "id": "noisy",
+        "file": "sample_noisy_artifacts_8ch.edf",
+        "channels": 8, "sampling_rate": 250, "duration_sec": 20.0,
+        "kind": "synthetic",
+        "source": "Synthetic — generated by the NeuroAccess EEG simulator (with artifacts)",
+        "license": "CC0 1.0 (synthetic data, no rights reserved)",
+        "recording": "8 channels · 250 Hz · 20 s · high noise + eye-blink / muscle / power-line artifacts",
+    },
+    "frequency": {
+        "id": "frequency",
+        "file": "sample_real_eegmmidb_S002R04.edf",
+        "channels": 64, "sampling_rate": 160, "duration_sec": 123.0,
+        "kind": "real",
+        "source": "PhysioNet EEG Motor Movement/Imagery Dataset (EEGMMIDB) v1.0.0, record S002R04",
+        "license": "Open Data Commons Attribution License v1.0 (ODC-BY 1.0)",
+        "recording": "64 channels · 160 Hz · 123 s · resting / motor task recording (no diagnosis labels)",
+    },
+}
+
+
+def _samples_payload():
+    out = []
+    for key, meta in SAMPLE_REGISTRY.items():
+        p = os.path.join(SAMPLES_DIR, meta["file"])
+        item = {k: v for k, v in meta.items() if k != "file"}
+        item["available"] = os.path.exists(p)
+        out.append(item)
+    return out
+
+
+@app.get("/api/samples")
+def api_samples():
+    """示例 EEG 列表（无需登录）。只返回事实性元数据。"""
+    return {"success": True, "samples": _samples_payload()}
+
+
+@app.post("/api/try-sample")
+async def try_sample(request: Request):
+    """游客体验：分析内置示例 EEG。无需登录；结果不落库。"""
+    pid: Optional[str] = None
+    try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        sid = str(body.get("sample") or "clean")
+        pid = body.get("progress_id")
+        meta = SAMPLE_REGISTRY.get(sid)
+        if not meta:
+            _set_progress(pid, "error", error=f"Unknown sample: {sid}")
+            return {"success": False, "error": f"Unknown sample: {sid}"}
+        path = os.path.join(SAMPLES_DIR, meta["file"])
+        if not os.path.exists(path):
+            _set_progress(pid, "error", error="Sample file missing on server")
+            return {"success": False, "error": "Sample file missing on server"}
+        if analyze_edf is None:
+            _set_progress(pid, "error", error="analyze_edf not available")
+            return {"success": False, "error": f"analyze_edf not available: {ANALYSIS_IMPORT_ERROR}"}
+        lang = normalize_language(body.get("language") or "zh")
+
+        _set_progress(pid, "receiving")
+        try:
+            raw_result = await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: analyze_edf(
+                        path, lang,
+                        progress_cb=(lambda st: _set_progress(pid, st)),
+                    ),
+                ),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            _set_progress(pid, "error", error="Analysis timed out (60s)")
+            return {"success": False, "error": "Analysis timed out (60s)."}
+
+        _set_progress(pid, "report")
+        enhanced = enhance_analysis(raw_result, lang)
+        template_explanations = {
+            lang: {"beginner": template_beginner(enhanced, lang),
+                   "student": template_student(enhanced, lang),
+                   "research": template_research(enhanced, lang)},
+            "en": {"beginner": template_beginner(enhanced, "en"),
+                   "student": template_student(enhanced, "en"),
+                   "research": template_research(enhanced, "en")},
+        }
+        analysis_id = hashlib.md5((path + str(_time.time())).encode()).hexdigest()[:12]
+        _cache_explanations(analysis_id, {"explanations": None, "ready": False})
+        _set_progress(pid, "report", analysis_id=analysis_id)
+
+        analysis_out = {
+            **enhanced,
+            "explanations": template_explanations,
+            "analysis_id": analysis_id,
+            "disclaimer": NON_MEDICAL_DISCLAIMER,
+            "file_size_mb": raw_result.get("file_size_mb", 0),
+        }
+        # 后台生成 AI 解释（report_payload=None → 不写数据库，游客报告不入库）
+        _set_progress(pid, "ai", analysis_id=analysis_id)
+        threading.Thread(target=_bg_generate_explanations,
+                         args=(analysis_id, enhanced, lang, None), daemon=True).start()
+
+        resp = dict(analysis_out)
+        resp["waveform_preview"] = _downsample_waveform_preview(analysis_out.get("waveform_preview"), 800)
+        return {"success": True, "guest": True, "sample": {k: v for k, v in meta.items() if k != "file"},
+                "file_name": meta["file"], "analysis": resp}
+    except ValueError as e:
+        _set_progress(pid, "error", error=str(e))
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        import traceback
+        _set_progress(pid, "error", error=f"Internal server error: {str(e)}")
+        return {"success": False, "error": f"Internal server error: {str(e)}",
+                "detail": traceback.format_exc() if os.getenv("DEBUG") else "Enable DEBUG=1 for details"}
+
+
+# =================================================================
+# 案例库：真实公开数据集片段（免登录分析）
+# ---------------------------------------------------------------------
+# 每个 .edf 都是从公开 EEG 数据集中裁剪出的固定片段，只做「时间窗裁剪 +
+# 标准 EDF 重写」，未改动信号内容，未滤波、未合成。
+# 来源（数据集 / 记录号 / 许可 / 引用 / 官方标注）见同目录 DATASET_PROVENANCE.json，
+# 每个片段的实测指标见 MEASURED_METRICS.json。
+# 与 /api/try-sample 一致：免登录、结果不落库。
+# =================================================================
+CASES_DIR = os.path.join(BASE_DIR, "cases")
+
+_CHB_LIC = "Open Data Commons Attribution License v1.0 (ODC-By 1.0)"
+_CHB_CITE = ("Guttag, J. (2010). CHB-MIT Scalp EEG Database (version 1.0.0). "
+             "PhysioNet. doi:10.13026/C2K01R")
+_DS_LIC = "CC0 1.0 (public domain dedication)"
+_DS_CITE = ("Miltiadous, A. et al. (2023). A Dataset of Scalp EEG Recordings of Alzheimer's "
+            "Disease, Frontotemporal Dementia and Healthy Subjects from Routine EEG. "
+            "Data, 8(6), 95. doi:10.3390/data8060095")
+
+CASE_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "c1": {
+        "id": "c1", "file": "chbmit_chb01_03_seizure.edf",
+        "dataset": "CHB-MIT Scalp EEG Database v1.0.0",
+        "dataset_url": "https://physionet.org/content/chbmit/1.0.0/",
+        "record": "chb01_03",
+        "subject": "11-year-old female, focal epilepsy (case chb01)",
+        "annotation": "Seizure onset 2996 s, offset 3036 s (annotated by the dataset)",
+        "license": _CHB_LIC, "citation": _CHB_CITE,
+        "channels": 23, "sampling_rate": 256, "duration_sec": 55.0, "kind": "seizure",
+    },
+    "c2": {
+        "id": "c2", "file": "chbmit_chb01_04_seizure.edf",
+        "dataset": "CHB-MIT Scalp EEG Database v1.0.0",
+        "dataset_url": "https://physionet.org/content/chbmit/1.0.0/",
+        "record": "chb01_04",
+        "subject": "11-year-old female, focal epilepsy (case chb01)",
+        "annotation": "Seizure onset 1467 s, offset 1494 s (annotated by the dataset)",
+        "license": _CHB_LIC, "citation": _CHB_CITE,
+        "channels": 23, "sampling_rate": 256, "duration_sec": 42.0, "kind": "seizure",
+    },
+    "c3": {
+        "id": "c3", "file": "chbmit_chb01_15_seizure.edf",
+        "dataset": "CHB-MIT Scalp EEG Database v1.0.0",
+        "dataset_url": "https://physionet.org/content/chbmit/1.0.0/",
+        "record": "chb01_15",
+        "subject": "11-year-old female, focal epilepsy (case chb01)",
+        "annotation": "Seizure onset 1732 s, offset 1772 s (annotated by the dataset)",
+        "license": _CHB_LIC, "citation": _CHB_CITE,
+        "channels": 23, "sampling_rate": 256, "duration_sec": 55.0, "kind": "seizure",
+    },
+    "c4": {
+        "id": "c4", "file": "chbmit_chb01_02_interictal.edf",
+        "dataset": "CHB-MIT Scalp EEG Database v1.0.0",
+        "dataset_url": "https://physionet.org/content/chbmit/1.0.0/",
+        "record": "chb01_02",
+        "subject": "11-year-old female, focal epilepsy (case chb01)",
+        "annotation": "No seizure in this record; window taken far from any annotated seizure",
+        "license": _CHB_LIC, "citation": _CHB_CITE,
+        "channels": 23, "sampling_rate": 256, "duration_sec": 55.0, "kind": "interictal",
+    },
+    "c5": {
+        "id": "c5", "file": "ds004504_sub-001_alzheimer.edf",
+        "dataset": "OpenNeuro ds004504 — EEG of Alzheimer's disease, FTD and healthy subjects",
+        "dataset_url": "https://openneuro.org/datasets/ds004504",
+        "record": "sub-001",
+        "subject": "Alzheimer's disease group (A), MMSE 16, 57-year-old female",
+        "annotation": "Eyes-closed resting-state EEG, first 60 s",
+        "license": _DS_LIC, "citation": _DS_CITE,
+        "channels": 19, "sampling_rate": 500, "duration_sec": 60.0, "kind": "alzheimers",
+    },
+    "c6": {
+        "id": "c6", "file": "ds004504_sub-002_alzheimer.edf",
+        "dataset": "OpenNeuro ds004504 — EEG of Alzheimer's disease, FTD and healthy subjects",
+        "dataset_url": "https://openneuro.org/datasets/ds004504",
+        "record": "sub-002",
+        "subject": "Alzheimer's disease group (A), MMSE 22, 78-year-old female",
+        "annotation": "Eyes-closed resting-state EEG, first 60 s",
+        "license": _DS_LIC, "citation": _DS_CITE,
+        "channels": 19, "sampling_rate": 500, "duration_sec": 60.0, "kind": "alzheimers",
+    },
+    "c7": {
+        "id": "c7", "file": "ds004504_sub-066_ftd.edf",
+        "dataset": "OpenNeuro ds004504 — EEG of Alzheimer's disease, FTD and healthy subjects",
+        "dataset_url": "https://openneuro.org/datasets/ds004504",
+        "record": "sub-066",
+        "subject": "Frontotemporal dementia group (F), MMSE 20, 73-year-old male",
+        "annotation": "Eyes-closed resting-state EEG, first 60 s",
+        "license": _DS_LIC, "citation": _DS_CITE,
+        "channels": 19, "sampling_rate": 500, "duration_sec": 60.0, "kind": "ftd",
+    },
+    "c8": {
+        "id": "c8", "file": "ds004504_sub-037_control.edf",
+        "dataset": "OpenNeuro ds004504 — EEG of Alzheimer's disease, FTD and healthy subjects",
+        "dataset_url": "https://openneuro.org/datasets/ds004504",
+        "record": "sub-037",
+        "subject": "Healthy control group (C), MMSE 30, 57-year-old male",
+        "annotation": "Eyes-closed resting-state EEG, first 60 s",
+        "license": _DS_LIC, "citation": _DS_CITE,
+        "channels": 19, "sampling_rate": 500, "duration_sec": 60.0, "kind": "control",
+    },
+}
+
+
+def _cases_payload():
+    out = []
+    for key, meta in CASE_REGISTRY.items():
+        p = os.path.join(CASES_DIR, meta["file"])
+        item = {k: v for k, v in meta.items() if k != "file"}
+        item["available"] = os.path.exists(p)
+        out.append(item)
+    return out
+
+
+@app.get("/api/cases")
+def api_cases():
+    """案例库数据集清单（无需登录）。只返回事实性元数据。"""
+    return {"success": True, "cases": _cases_payload()}
+
+
+@app.post("/api/cases/analyze")
+async def analyze_case(request: Request):
+    """分析案例库中的真实公开数据集片段。无需登录；结果不落库。"""
+    pid: Optional[str] = None
+    try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        cid = str(body.get("case_id") or "")
+        pid = body.get("progress_id")
+        meta = CASE_REGISTRY.get(cid)
+        if not meta:
+            _set_progress(pid, "error", error=f"Unknown case: {cid}")
+            return {"success": False, "error": f"Unknown case: {cid}"}
+        path = os.path.join(CASES_DIR, meta["file"])
+        if not os.path.exists(path):
+            _set_progress(pid, "error", error="Case file missing on server")
+            return {"success": False, "error": "Case file missing on server"}
+        if analyze_edf is None:
+            _set_progress(pid, "error", error="analyze_edf not available")
+            return {"success": False, "error": f"analyze_edf not available: {ANALYSIS_IMPORT_ERROR}"}
+        lang = normalize_language(body.get("language") or "zh")
+
+        _set_progress(pid, "receiving")
+        try:
+            raw_result = await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: analyze_edf(
+                        path, lang,
+                        progress_cb=(lambda st: _set_progress(pid, st)),
+                    ),
+                ),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            _set_progress(pid, "error", error="Analysis timed out (60s)")
+            return {"success": False, "error": "Analysis timed out (60s)."}
+
+        _set_progress(pid, "report")
+        enhanced = enhance_analysis(raw_result, lang)
+        template_explanations = {
+            lang: {"beginner": template_beginner(enhanced, lang),
+                   "student": template_student(enhanced, lang),
+                   "research": template_research(enhanced, lang)},
+            "en": {"beginner": template_beginner(enhanced, "en"),
+                   "student": template_student(enhanced, "en"),
+                   "research": template_research(enhanced, "en")},
+        }
+        analysis_id = hashlib.md5((path + "case" + str(_time.time())).encode()).hexdigest()[:12]
+        _cache_explanations(analysis_id, {"explanations": None, "ready": False})
+        _set_progress(pid, "report", analysis_id=analysis_id)
+
+        analysis_out = {
+            **enhanced,
+            "explanations": template_explanations,
+            "analysis_id": analysis_id,
+            "disclaimer": NON_MEDICAL_DISCLAIMER,
+            "file_size_mb": raw_result.get("file_size_mb", 0),
+        }
+        # 后台生成 AI 解释（report_payload=None → 不写数据库）
+        _set_progress(pid, "ai", analysis_id=analysis_id)
+        threading.Thread(target=_bg_generate_explanations,
+                         args=(analysis_id, enhanced, lang, None), daemon=True).start()
+
+        resp = dict(analysis_out)
+        resp["waveform_preview"] = _downsample_waveform_preview(analysis_out.get("waveform_preview"), 800)
+        return {"success": True, "guest": True, "case": {k: v for k, v in meta.items() if k != "file"},
+                "file_name": meta["file"], "analysis": resp}
+    except ValueError as e:
+        _set_progress(pid, "error", error=str(e))
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        import traceback
+        _set_progress(pid, "error", error=f"Internal server error: {str(e)}")
+        return {"success": False, "error": f"Internal server error: {str(e)}",
+                "detail": traceback.format_exc() if os.getenv("DEBUG") else "Enable DEBUG=1 for details"}
+
+
+# =================================================================
 # v2.0: /explain — AI 解释（前端收到基础分析后再调用）
 # =================================================================
-
 @app.post("/api/explain")
 async def explain(request: Request):
     """
@@ -715,12 +1175,14 @@ async def explain(request: Request):
     if not analysis_data:
         return {"success": False, "error": "Missing 'analysis' field"}
     
-    # ── 180s 超时解析（Ollama 较慢时用）───────────────────────
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        future = pool.submit(generate_explanations, analysis_data, language)
-        try:
-            explanations = future.result(timeout=180)
-        except concurrent.futures.TimeoutError:
+    # ── 180s 超时解析（修复：await 化，避免阻塞事件循环 180s）──
+    try:
+        explanations = await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(
+                None, generate_explanations, analysis_data, language),
+            timeout=180,
+        )
+    except asyncio.TimeoutError:
             # 超时时用模板解释兜底
             explanations = {
                 language: {
@@ -738,6 +1200,24 @@ async def explain(request: Request):
                     "warning": "AI explanation timed out. Template explanations used instead."}
     
     return {"success": True, "explanations": explanations}
+
+
+# =================================================================
+# 分析进度查询端点（真实分步进度）
+# 前端在 /api/analyze 进行期间轮询本端点，用来展示「现在在做什么」。
+# 只暴露阶段名与时间戳，不含任何用户数据。
+# =================================================================
+
+@app.get("/api/analysis/progress/{progress_id}")
+async def get_progress(progress_id: str):
+    with _PROGRESS_LOCK:
+        cur = _PROGRESS_STORE.get(progress_id)
+        if cur:
+            cur = dict(cur)
+    if not cur:
+        return {"success": False, "error": "Unknown progress id"}
+    cur["success"] = True
+    return cur
 
 
 # =================================================================
@@ -1137,7 +1617,7 @@ def org_my(credentials: HTTPAuthorizationCredentials = Depends(security)):
 def _get_org_conn():
     import sqlite3 as _sqlite3
     _base = os.path.dirname(os.path.abspath(__file__))
-    conn = _sqlite3.connect(os.path.join(_base, "neuroaccess.db"))
+    conn = _sqlite3.connect(os.path.join(_base, "neuroaccess.db"), timeout=10)
     conn.row_factory = _sqlite3.Row
     return conn
 
@@ -1187,14 +1667,7 @@ def auth_send_login_code(email: str = Form(...)):
             return {"success": False, "error": f"已有验证码，请等待{remaining}秒后再试"}
         code = generate_verification_code(email=email, purpose="login")
         email_sent = send_verification_email(email, code, purpose="login")
-        result = {"success": True, "expires_in": 600}
-        if email_sent == "sent":
-            result["message"] = "Verification code sent"
-        else:
-            result["message"] = "Verification code (email not configured)" if email_sent == "not_configured" else "Verification code (email send failed, please retry)"
-            if os.getenv("DEBUG", "").lower() in ("1", "true", "yes"):
-                result["dev_code"] = code
-        return result
+        return _code_result(email_sent, code, "Verification code sent")
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1267,7 +1740,7 @@ def send_verification_email(to_email: str, code: str, purpose: str = "password_c
     smtp_port = int(_os.getenv("SMTP_PORT", "587"))
     smtp_username = _os.getenv("SMTP_USERNAME", "")
     smtp_password = _os.getenv("SMTP_PASSWORD", "")
-    smtp_from = _os.getenv("SMTP_FROM", "")
+    smtp_from = _os.getenv("SMTP_FROM", "neuroaccess2026@gmail.com")
     if purpose == "register":
         subject = "NeuroAccess - 注册验证码"
         html = f"""<html><body style="font-family:Arial,sans-serif"><h2 style="color:#3B82F6">NeuroAccess 注册验证码</h2><p>您的验证码是：</p><div style="background:#f0f9ff;border:2px solid #3B82F6;border-radius:8px;padding:20px;text-align:center;margin:20px 0"><span style="font-size:32px;font-weight:bold;color:#3B82F6;letter-spacing:8px">{code}</span></div><p>10分钟后过期。</p></body></html>"""
@@ -1301,6 +1774,30 @@ def send_verification_email(to_email: str, code: str, purpose: str = "password_c
     except Exception as e:
         print(f"[Email] SMTP failed: {e}")
         return "failed"
+
+def _code_result(email_sent: str, code: str, sent_msg: str = "Verification code sent") -> dict:
+    """统一构造「验证码」类响应，明确区分【已生成】与【已发送】两个事实。
+
+    - success 恒为 True：验证码确实已生成并写入 verification_codes 表，
+      用户可以拿它完成后续步骤（改密 / 换邮箱 / 注销 / 注册）。
+    - email_sent 才是「邮件是否真的投递出去」的唯一真源：
+      'sent' / 'not_configured'（SMTP 环境变量缺失）/ 'failed'（SMTP 报错）。
+      前端必须读这个字段来决定提示文案，不能只看 success，
+      否则 SMTP 故障时会骗用户「验证码已发送到你的邮箱」。
+    - message 保留英文文案（兼容旧客户端）；dev_code 仅 DEBUG 下返回。
+    """
+    res = {"success": True, "expires_in": 600, "email_sent": email_sent}
+    if email_sent == "sent":
+        res["message"] = sent_msg
+    else:
+        res["message"] = (
+            "Verification code (email not configured)"
+            if email_sent == "not_configured"
+            else "Verification code (email send failed, please retry)"
+        )
+        if os.getenv("DEBUG", "").lower() in ("1", "true", "yes"):
+            res["dev_code"] = code
+    return res
 
 def _has_active_code(conn, user_id=None, email=None, purpose=None):
     from datetime import datetime as _dt, timezone as _tz
@@ -1339,6 +1836,12 @@ def _has_active_code(conn, user_id=None, email=None, purpose=None):
 def auth_register_verification_code(email: str = Form(...)):
     if not AUTH_AVAILABLE:
         return {"success": False, "error": "认证模块不可用"}
+    # 邮箱格式校验：与 /api/auth/send-email-change-code 保持一致。
+    # 缺这一步时，形如 "a@@b" 的地址会拿到 success:true（假成功）、被写入一条永远收不到的验证码、
+    # 并触发 60s 冷却；用户会一直停在「验证码已发送」却永远等不到邮件。
+    import re
+    if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+        return {"success": False, "error": "邮箱格式无效"}
     # 内存级防重：同一邮箱 3 秒内只发一次
     if not _check_code_rate_limit(f"register:{email}", 3):
         return {"success": False, "error": "操作过于频繁，请3秒后再试"}
@@ -1364,14 +1867,7 @@ def auth_register_verification_code(email: str = Form(...)):
     except Exception as e:
         return {"success": False, "error": f"生成验证码失败: {e}"}
     email_sent = send_verification_email(email, code, purpose="register")
-    result = {"success": True, "expires_in": 600}
-    if email_sent == "sent":
-        result["message"] = "Verification code sent"
-    else:
-        result["message"] = "Verification code (email not configured)" if email_sent == "not_configured" else "Verification code (email send failed, please retry)"
-        if os.getenv("DEBUG", "").lower() in ("1", "true", "yes"):
-            result["dev_code"] = code
-    return result
+    return _code_result(email_sent, code, "Verification code sent")
 
 def verify_registration_code(email: str, code: str) -> bool:
     return verify_verification_code(email=email, code=code, purpose="register")
@@ -1413,14 +1909,7 @@ def auth_verification_code(credentials: HTTPAuthorizationCredentials = Depends(s
         conn.close()
     code = generate_verification_code(user_id, purpose="password_change")
     email_sent = send_verification_email(user["email"], code)
-    result = {"success": True, "expires_in": 600}
-    if email_sent == "sent":
-        result["message"] = "Verification code sent"
-    else:
-        result["message"] = "Verification code generated"
-        if os.getenv("DEBUG") == "1":
-            result["dev_code"] = code
-    return result
+    return _code_result(email_sent, code, "Verification code sent")
 
 @app.post("/api/auth/change-password")
 def auth_change_password(credentials: HTTPAuthorizationCredentials = Depends(security), verification_code: str = Form(...), new_password: str = Form(...)):
@@ -1465,14 +1954,7 @@ def auth_send_old_email_code(credentials: HTTPAuthorizationCredentials = Depends
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"已有验证码，请等待{remaining}秒后再试")
     code = generate_verification_code(user_id, purpose="old_email_verify")
     email_sent = send_verification_email(user["email"], code, purpose="old_email_verify")
-    result = {"success": True, "expires_in": 600}
-    if email_sent == "sent":
-        result["message"] = "Verification code sent to current email"
-    else:
-        result["message"] = "Verification code (email not configured)" if email_sent == "not_configured" else "Verification code (email send failed, please retry)"
-        if os.getenv("DEBUG", "").lower() in ("1", "true", "yes"):
-            result["dev_code"] = code
-    return result
+    return _code_result(email_sent, code, "Verification code sent to current email")
 
 @app.post("/api/auth/verify-old-email")
 def auth_verify_old_email(credentials: HTTPAuthorizationCredentials = Depends(security), code: str = Form(...)):
@@ -1539,14 +2021,7 @@ def auth_send_email_change_code(credentials: HTTPAuthorizationCredentials = Depe
         conn.close()
     code = generate_verification_code(user_id, purpose=f"email_change:{new_email}")
     email_sent = send_verification_email(new_email, code, purpose="email_change")
-    result = {"success": True, "expires_in": 600}
-    if email_sent == "sent":
-        result["message"] = "Verification code sent"
-    else:
-        result["message"] = "Verification code generated"
-        if os.getenv("DEBUG") == "1":
-            result["dev_code"] = code
-    return result
+    return _code_result(email_sent, code, "Verification code sent")
 
 @app.post("/api/auth/confirm-email-change")
 def auth_confirm_email_change(credentials: HTTPAuthorizationCredentials = Depends(security), verification_code: str = Form(...), new_email: str = Form(...)):
@@ -1606,14 +2081,7 @@ def auth_send_delete_account_code(credentials: HTTPAuthorizationCredentials = De
         conn.close()
     code = generate_verification_code(user_id, purpose="delete_account")
     email_sent = send_verification_email(user["email"], code, purpose="delete_account")
-    result = {"success": True, "expires_in": 600}
-    if email_sent == "sent":
-        result["message"] = "Verification code sent"
-    else:
-        result["message"] = "Verification code generated"
-        if os.getenv("DEBUG") == "1":
-            result["dev_code"] = code
-    return result
+    return _code_result(email_sent, code, "Verification code sent")
 
 @app.post("/api/auth/confirm-delete-account")
 def auth_confirm_delete_account(credentials: HTTPAuthorizationCredentials = Depends(security), verification_code: str = Form(...)):
@@ -1748,16 +2216,29 @@ async def submit_feedback(request: Request):
 # v2.1: 命名自定义预设（模拟器）——保存到账号，跨设备同步
 # =================================================================
 
+def _bearer_user_id(request: Request) -> int:
+    """从 `Authorization: Bearer <jwt>` 解析并校验用户，返回 user_id。
+
+    失败一律抛 401（与 reports 系列 `_report_user_id` 风格统一），
+    不再用「HTTP 200 + success:false」这种软鉴权写法 —— 软鉴权会让
+    调用方 / 网关 / 日志都无法区分「没登录」和「业务失败」。
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录凭证无效")
+    payload = verify_token(auth_header[7:].strip())
+    if not payload or "sub" not in payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录凭证无效")
+    try:
+        return int(payload["sub"])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录凭证无效")
+
+
 @app.get("/api/sim-presets")
 async def get_sim_presets(request: Request):
     try:
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return {"success": False, "error": "Not authenticated"}
-        payload = verify_token(auth_header[7:].strip())
-        if not payload:
-            return {"success": False, "error": "Invalid token"}
-        user_id = int(payload["sub"])
+        user_id = _bearer_user_id(request)
         conn = get_db()
         conn.execute("CREATE TABLE IF NOT EXISTS sim_presets (user_id INTEGER PRIMARY KEY, data TEXT)")
         row = conn.execute("SELECT data FROM sim_presets WHERE user_id=?", (user_id,)).fetchone()
@@ -1769,6 +2250,9 @@ async def get_sim_presets(request: Request):
         if not isinstance(presets, list):
             presets = []
         return {"success": True, "presets": presets}
+    except HTTPException:
+        # 401 必须原样抛出：被下面的 except Exception 吞掉会退化成 HTTP 200
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1788,13 +2272,7 @@ async def put_sim_presets(request: Request):
     for p in presets:
         p["name"] = p["name"][:20]
     try:
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return {"success": False, "error": "Not authenticated"}
-        payload = verify_token(auth_header[7:].strip())
-        if not payload:
-            return {"success": False, "error": "Invalid token"}
-        user_id = int(payload["sub"])
+        user_id = _bearer_user_id(request)
         conn = get_db()
         conn.execute("CREATE TABLE IF NOT EXISTS sim_presets (user_id INTEGER PRIMARY KEY, data TEXT)")
         conn.execute(
@@ -1804,6 +2282,9 @@ async def put_sim_presets(request: Request):
         conn.commit()
         conn.close()
         return {"success": True, "presets": presets}
+    except HTTPException:
+        # 401 必须原样抛出（见 GET 同名注释）
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1863,7 +2344,7 @@ async def submit_survey(request: Request, credentials: HTTPAuthorizationCredenti
         try:
             import sqlite3
             db_path = os.path.join(BASE_DIR, "neuroaccess.db")
-            conn = sqlite3.connect(db_path)
+            conn = sqlite3.connect(db_path, timeout=10)
             conn.execute(
                 "INSERT INTO survey_submissions (user_id, data, created_at) VALUES (?,?,?)",
                 (user_id, json.dumps(body, ensure_ascii=False), ts),
@@ -2222,9 +2703,11 @@ def gen_waveform_svg(rid: str, page: int = -1) -> str:
         return f"<svg width=400 height=100><text y=50 fill=red>Error: {esc(str(e))}</text></svg>"
 
 @app.post("/api/eeg-simulator/generate")
-async def eeg_simulator_generate(request: Request, _uid: int = Depends(require_user_id)):
-    # ── Auth（AUTH 启用时必须登录；关闭时游客可生成，便于本地开发）──
-    # 鉴权由 Depends(require_user_id) 完成：无 token/账号已注销 → 401
+async def eeg_simulator_generate(request: Request, _uid: Optional[int] = Depends(optional_user_id)):
+    # ── Auth：游客可用（无需登录）────────────────────────────────────
+    # 产品定位：EEG 模拟器属于「零门槛体验」入口，不要求注册即可生成信号。
+    # 生成成本可控（参数已做范围校验），且不写入任何用户数据。
+    # 仅「保存预设到账户」(/api/sim-presets) 仍需登录。
     try:
         try:
             body = await request.json()
@@ -2252,8 +2735,11 @@ async def eeg_simulator_generate(request: Request, _uid: int = Depends(require_u
                 raise ValueError(f"参数 {name} 必须在 {lo}~{hi} 之间")
             return v
 
-        result = generate_synthetic_eeg(
-            duration_sec=_f("duration_sec", 10.0, 1.0, 300.0),
+        # 修复：模拟器生成大参数时可达数十秒 numpy 计算 → 放线程池，不阻塞事件循环
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: generate_synthetic_eeg(
+                duration_sec=_f("duration_sec", 10.0, 1.0, 300.0),
             sampling_rate=_i("sampling_rate", 250, 16, 4096),
             n_channels=_i("n_channels", 8, 1, 256),
             alpha_power=_f("alpha_power", 1.0, 0.0, 10.0),
@@ -2270,6 +2756,7 @@ async def eeg_simulator_generate(request: Request, _uid: int = Depends(require_u
             artifact_blink=bool(body.get("artifact_blink", False)),
             artifact_muscle=bool(body.get("artifact_muscle", False)),
             artifact_powerline=bool(body.get("artifact_powerline", False)),
+            ),
         )
         return result
     except ValueError as ve:

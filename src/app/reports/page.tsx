@@ -115,7 +115,6 @@ function ExplanationCards({ analysis }: { analysis: any }) {
   const { lang, t } = useLang();
   // 支持新旧两种数据结构
   const explanations = analysis?.explanations?.[lang] || analysis?.explanations;
-  const disclaimer  = analysis?.disclaimer?.[lang] || analysis?.disclaimer;
   if (!explanations) return null;
 
   const cards = [
@@ -163,13 +162,6 @@ function ExplanationCards({ analysis }: { analysis: any }) {
         </div>
       </div>
 
-      {/* Disclaimer */}
-      {disclaimer && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 text-xs leading-6 text-amber-800 dark:text-amber-400">
-          <strong>{t("nonMedicalDisclaimer")}：</strong>
-          {disclaimer}
-        </div>
-      )}
     </div>
   );
 }
@@ -225,7 +217,6 @@ function buildReportHtml(report: StoredReport, lang: string, t: (key: string) =>
   const scores = a?.eeg_literacy_scores as Record<string, number> | undefined;
   // 支持新旧两种数据结构
   const explanations = (a?.explanations?.[lang] || a?.explanations) as Record<string, string> | undefined;
-  const disclaimer  = (a?.disclaimer?.[lang] || a?.disclaimer) as string | undefined;
 
   const scoreList = scores ? [
     { key: "learning_readability_score", label: t("learningReadability") },
@@ -279,7 +270,6 @@ function buildReportHtml(report: StoredReport, lang: string, t: (key: string) =>
   .limitations-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 12px; flex: 2; }
   .box-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #111; }
   .box-text { font-size: 12px; color: #374151; line-height: 1.6; }
-  .disclaimer { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px 14px; margin-top: 24px; font-size: 12px; color: #92400e; line-height: 1.6; }
   .two-col { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; margin-bottom: 12px; }
   @media print { body { padding: 20px; } }
 </style>
@@ -328,8 +318,6 @@ function buildReportHtml(report: StoredReport, lang: string, t: (key: string) =>
     <div class="confidence-box"><div class="box-title">${esc(t("interpretationConfidence"))}</div><div class="box-text">${a?.confidence?.level ? (() => { const k = `confidence${a.confidence.level}`; const l = t(k); return esc(l === k ? a.confidence.level : l); })() : "-"}</div><div style="font-size:11px;color:#6b7280;margin-top:4px">${esc(a?.confidence?.reason || "")}</div></div>
     <div class="limitations-box"><div class="box-title">${esc(t("whatDataCannotTell"))}</div><ul style="padding-left:18px;font-size:12px;color:#374151;line-height:1.7">${(a?.limitations || []).map((x: any)=>`<li>${esc(x)}</li>`).join("")}</ul></div>
   </div>` : ""}
-
-  ${disclaimer ? `<div class="disclaimer"><strong>${t("nonMedicalDisclaimer")}：</strong>${disclaimer}</div>` : ""}
 
   <script>
     // 自动触发打印对话框，打印后自动关闭窗口

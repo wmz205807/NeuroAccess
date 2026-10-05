@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "annotated", "backend", "demo", "docs", "screenshots", "deploy", ".next"]
+  "exclude": ["node_modules", "annotated", "backend", "demo", "docs", "screenshots", "deploy", ".next", "legacy_archive"]
 }

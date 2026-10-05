@@ -15,6 +15,14 @@ const AVATAR_COLORS = [
   "#3B82F6", "#8B5CF6", "#EC4899", "#14B8A6",
 ];
 
+/**
+ * 后端 email_sent 才是「邮件是否真的发出」的唯一真源（'sent' / 'not_configured' / 'failed'）。
+ * 接口的 success 只代表验证码已生成入库 —— SMTP 挂了也照样是 success。
+ * 所以这里必须单独看 email_sent，否则会骗用户「验证码已发送到你的邮箱」。
+ * 字段缺失（旧后端）视为已发送，保证向后兼容。
+ */
+const emailSentOk = (emailSent?: string) => !emailSent || emailSent === "sent";
+
 export default function AccountPage() {
   const { user, token, logout, updateUser, updateProfile, changePassword, sendVerificationCode, updateEmail, sendOldEmailCode, verifyOldEmail, sendDeleteAccountCode, deleteAccount, loading } = useAuth();
   const { lang } = useLang();
@@ -22,9 +30,13 @@ export default function AccountPage() {
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
+  // 主动登出/注销时先立旗：否则下面「!user → /login」会抢在业务代码的 router.push 之前触发，
+  // 使「退出登录」落到 /login（代码本意是回首页），注销成功的「账号已注销」提示也来不及显示就被弹走。
+  const leavingRef = useRef(false);
+
   // Redirect if not logged in (but wait for loading to finish)
   useEffect(() => {
-    if (!loading && !user) router.push("/login");
+    if (!loading && !user && !leavingRef.current) router.push("/login");
   }, [loading, user, router]);
 
   // 防连点: 所有发送验证码都用同一个 ref
@@ -135,8 +147,9 @@ export default function AccountPage() {
     try {
       const result = await sendVerificationCode({});
       if (result.success) {
-        setPwSuccess(t(lang, "codeSentToEmail"));
         setPwCountdown(60);
+        if (emailSentOk(result.emailSent)) setPwSuccess(t(lang, "codeSentToEmail"));
+        else setPwError(t(lang, "sendCodeFailed"));
       } else {
         setPwError(result.error || t(lang, "sendCodeFailed"));
       }
@@ -200,8 +213,9 @@ export default function AccountPage() {
     try {
       const result = await sendOldEmailCode();
       if (result.success) {
-        setEmailSuccess(t(lang, "codeSentToEmail"));
         setOldEmailCountdown(60);
+        if (emailSentOk(result.emailSent)) setEmailSuccess(t(lang, "codeSentToEmail"));
+        else setEmailError(t(lang, "sendCodeFailed"));
       } else {
         setEmailError(result.error || t(lang, "sendCodeFailed"));
       }
@@ -270,8 +284,9 @@ export default function AccountPage() {
         result = { detail: t(lang, "sendCodeFailed") };
       }
       if (resp.ok && result.success) {
-        setEmailSuccess(t(lang, "codeSentToEmail"));
         setEmailCountdown(60);
+        if (emailSentOk(result.email_sent)) setEmailSuccess(t(lang, "codeSentToEmail"));
+        else setEmailError(t(lang, "sendCodeFailed"));
       } else {
         setEmailError(result.detail || result.error || t(lang, "sendCodeFailed"));
       }
@@ -321,7 +336,8 @@ export default function AccountPage() {
     try {
       const result = await sendDeleteAccountCode();
       if (result.success) {
-        setDeleteSuccess(t(lang, "codeSentToEmail"));
+        if (emailSentOk(result.emailSent)) setDeleteSuccess(t(lang, "codeSentToEmail"));
+        else setDeleteError(t(lang, "sendCodeFailed"));
       } else {
         setDeleteError(result.error || t(lang, "sendCodeFailed"));
       }
@@ -344,6 +360,8 @@ export default function AccountPage() {
     if (!window.confirm(confirmMsg)) {
       return;
     }
+    // 先立旗：deleteAccount 内部成功时会立刻 setUser(null)，否则本页的 !user → /login 会抢先跳走
+    leavingRef.current = true;
     setDeleteLoading(true);
     try {
       const result = await deleteAccount({ verification_code: deleteCode });
@@ -351,15 +369,19 @@ export default function AccountPage() {
         setDeleteSuccess(t(lang, "accountDeleted"));
         setTimeout(() => { logout(); router.push("/"); }, 1500);
       } else {
+        leavingRef.current = false;
         setDeleteError(result.error || t(lang, "failedToDeleteAccount"));
       }
     } catch (e: any) {
+      leavingRef.current = false;
       setDeleteError(e.message || t(lang, "failedToDeleteAccount"));
     }
     setDeleteLoading(false);
   };
 
-  if (loading || !user) {
+  // 注销成功的瞬间 user 已被清空，但本页还要停留 1.5s 把「账号已注销」提示显示给用户。
+  // 若此处仍按 !user 兜底成 loading 骨架，提示会被整个替换掉、用户根本看不到。
+  if (loading || (!user && !deleteSuccess)) {
     return (
       <div className="min-h-screen bg-[var(--color-bg)] flex items-center justify-center">
         <div className="text-[var(--color-text-secondary)]">{t(lang, "loading")}</div>
@@ -562,7 +584,7 @@ export default function AccountPage() {
           </div>
           <div className="p-5 space-y-4">
             <p className="text-xs text-[var(--color-text-secondary)]">
-              {t(lang, "currentEmail")}: <span className="text-[var(--color-text)]">{user.email}</span>
+              {t(lang, "currentEmail")}: <span className="text-[var(--color-text)]">{user?.email}</span>
             </p>
 
             {/* Step 1: 验证旧邮箱 */}
@@ -674,7 +696,7 @@ export default function AccountPage() {
         {/* 退出登录 */}
         <div className="pt-4">
           <button
-            onClick={() => { logout(); router.push("/"); }}
+            onClick={() => { leavingRef.current = true; logout(); router.push("/"); }}
             className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors"
           >
             {t(lang, "logout")}

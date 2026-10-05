@@ -130,7 +130,11 @@ export default function LoginForm({ lang }: LoginFormProps) {
       const result = await sendLoginCode(codeEmail.trim());
       if (result.success) {
         setCodeCountdown(60);
-        setCodeSentMsg(true);
+        // email_sent 才是「邮件是否真的发出」的真源：SMTP 未配置/发送失败时后端仍返回
+        // success=true（验证码已生成入库），但绝不能提示「验证码已发送到你的邮箱」。
+        const sentOk = !result.emailSent || result.emailSent === "sent";
+        setCodeSentMsg(sentOk);
+        if (!sentOk) setError(tf("sendCodeFailed", "Failed to send verification code"));
         if (countdownRef.current) clearInterval(countdownRef.current);
         countdownRef.current = setInterval(() => {
           setCodeCountdown((prev) => {
@@ -325,6 +329,20 @@ export default function LoginForm({ lang }: LoginFormProps) {
         <p className="mt-3 text-center text-xs text-[var(--color-text-secondary)]">
           {tf("loginHint", "You will be redirected after login.")}
         </p>
+
+        {/* 游客模式：不登录直接进入，布局与登录态一致 */}
+        <div className="mt-6 pt-5 border-t border-[var(--color-border)]">
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className="w-full py-2.5 px-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] text-sm font-medium text-[var(--color-text)] hover:border-[var(--color-text-secondary)] transition-colors"
+          >
+            {tf("continueAsGuest", "Continue as guest")}
+          </button>
+          <p className="mt-2 text-center text-xs leading-5 text-[var(--color-text-secondary)]">
+            {tf("continueAsGuestHint", "Guests can browse analysis and learning content; reports require an account.")}
+          </p>
+        </div>
         </div>
         <TurnstileModal siteKey={turnstileSiteKey} open={turnstileOpen} onVerify={handleTurnstileVerify} onClose={() => { setTurnstileOpen(false); pendingLoginRef.current = null; }} />
       </motion.div>

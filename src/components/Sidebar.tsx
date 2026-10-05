@@ -40,16 +40,16 @@ export default function Sidebar() {
     setOpenSettings(() => () => setSettingsOpen(true));
   }, [setOpenSettings]);
 
-  // 语言变化时重新计算菜单标签
+  // 语言 / 登录状态变化时重新计算菜单标签
+  // 游客与登录用户共用同一套侧边栏，保持网站布局一致；
+  // 仅隐藏需要账户的「报告」入口（与移动端游客菜单行为一致）。
   const menuItems = useMemo(() => {
-    return menuKeys.map(item => ({
+    const keys = user ? menuKeys : menuKeys.filter((item) => item.href !== "/reports");
+    return keys.map(item => ({
       ...item,
       label: t(item.key),
     }));
-  }, [lang]);
-
-  // 未登录时不显示侧边栏
-  if (!user) return null;
+  }, [lang, user]);
 
   return (
     <aside

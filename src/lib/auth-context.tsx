@@ -17,18 +17,18 @@ interface AuthContextType {
   token: string | null;
   login: (usernameOrEmail: string, password: string, cfToken?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean; termsAccepted?: boolean; needsUsernameSetup?: boolean }>;
   register: (username: string, email: string, password: string, code?: string, cfToken?: string, inviteCode?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean }>;
-  sendLoginCode: (email: string) => Promise<{ success: boolean; error?: string }>;
+  sendLoginCode: (email: string) => Promise<{ success: boolean; error?: string; emailSent?: string }>;
   loginWithCode: (email: string, code: string, cfToken?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean; termsAccepted?: boolean; needsUsernameSetup?: boolean }>;
   logout: () => void;
   loading: boolean;
   updateUser: (user: User) => void;
   updateProfile: (data: { username?: string; avatar_color?: string }) => Promise<{ success: boolean; error?: string }>;
   changePassword: (data: { verification_code: string; new_password: string }) => Promise<{ success: boolean; error?: string }>;
-  sendVerificationCode: (data: { email?: string }) => Promise<{ success: boolean; error?: string }>;
+  sendVerificationCode: (data: { email?: string }) => Promise<{ success: boolean; error?: string; emailSent?: string }>;
   updateEmail: (data: { new_email: string; verification_code: string }) => Promise<{ success: boolean; error?: string }>;
-  sendOldEmailCode: () => Promise<{ success: boolean; error?: string }>;
+  sendOldEmailCode: () => Promise<{ success: boolean; error?: string; emailSent?: string }>;
   verifyOldEmail: (code: string) => Promise<{ success: boolean; error?: string }>;
-  sendDeleteAccountCode: () => Promise<{ success: boolean; error?: string }>;
+  sendDeleteAccountCode: () => Promise<{ success: boolean; error?: string; emailSent?: string }>;
   deleteAccount: (data: { verification_code: string }) => Promise<{ success: boolean; error?: string }>;
   termsAccepted: boolean;
   needsUsernameSetup: boolean;
@@ -169,6 +169,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (data && data.user) {
           setUser(data.user);
           try { localStorage.setItem("neuroaccess-user", JSON.stringify(data.user)); } catch {}
+          // 条款同意状态以服务端为准（与 login() 的分支保持一致）。
+          // 用户可能在其它设备已同意过；本机没有本地同意记录时，把服务端的结论补写到本地，
+          // 避免同一账号换设备 / 清缓存后被重复要求勾选条款。
+          // ⚠️ 新注册用户 DB terms_accepted=0 ⇒ 此分支不触发，注册后的强制性闸门照常弹出。
+          if (data.user.terms_accepted && !loadConsent()) {
+            saveConsent();
+            setTermsAccepted(true);
+          }
         }
         // 会话有效：同步跨设备报告（推送本机独有 + 拉取其它设备）
         await syncReportsOnLogin();
@@ -312,7 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const sendLoginCode = async (email: string): Promise<{ success: boolean; error?: string }> => {
+  const sendLoginCode = async (email: string): Promise<{ success: boolean; error?: string; emailSent?: string }> => {
     try {
       const resp = await fetch(`${API_BASE}/api/auth/send-login-code`, {
         method: "POST",
@@ -324,7 +332,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: data.detail || data.error || tf("sendCodeFailed", "Failed to send code") };
       }
       if (data.success) {
-        return { success: true };
+        // emailSent 是「邮件是否真的发出」的唯一真源：'已发送' | 'not_configured' | 'failed'。
+        // success 只代表验证码已生成入库，不能拿来当「已发送」用。
+        return { success: true, emailSent: data.email_sent };
       }
       return { success: false, error: data.error || tf("sendCodeFailed", "Failed to send code") };
     } catch (e: any) {
@@ -369,7 +379,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const sendOldEmailCode = async (): Promise<{ success: boolean; error?: string }> => {
+  const sendOldEmailCode = async (): Promise<{ success: boolean; error?: string; emailSent?: string }> => {
     if (!token) return { success: false, error: tf("notLoggedIn", "Not logged in") };
     try {
       const resp = await fetch(`${API_BASE}/api/auth/send-old-email-code`, {
@@ -380,7 +390,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!resp.ok) {
         return { success: false, error: result.detail || result.error || tf("sendCodeFailed", "Failed to send code") };
       }
-      if (result.success) return { success: true };
+      if (result.success) return { success: true, emailSent: result.email_sent };
       return { success: false, error: result.error || tf("sendCodeFailed", "Failed to send code") };
     } catch (e: any) {
       return { success: false, error: e.message || tf("networkErrorMsg", "Network error") };
@@ -479,7 +489,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const sendVerificationCode = async (data: { email?: string }): Promise<{ success: boolean; error?: string }> => {
+  const sendVerificationCode = async (data: { email?: string }): Promise<{ success: boolean; error?: string; emailSent?: string }> => {
     if (!token) return { success: false, error: tf("notLoggedIn", "Not logged in") };
     try {
       const resp = await fetch(`${API_BASE}/api/auth/verification-code`, {
@@ -498,7 +508,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: result.detail || result.error || tf("sendCodeFailed", "Failed to send verification code") };
       }
       if (result.success) {
-        return { success: true };
+        return { success: true, emailSent: result.email_sent };
       }
       return { success: false, error: result.error || tf("sendFailed", "Send failed") };
     } catch (e: any) {
@@ -535,7 +545,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const sendDeleteAccountCode = async (): Promise<{ success: boolean; error?: string }> => {
+  const sendDeleteAccountCode = async (): Promise<{ success: boolean; error?: string; emailSent?: string }> => {
     if (!token) return { success: false, error: tf("notLoggedIn", "Not logged in") };
     try {
       const resp = await fetch(`${API_BASE}/api/auth/send-delete-account-code`, {
@@ -554,7 +564,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: result.detail || result.error || tf("sendCodeFailed", "Failed to send verification code") };
       }
       if (result.success) {
-        return { success: true };
+        return { success: true, emailSent: result.email_sent };
       }
       return { success: false, error: result.error || tf("sendFailed", "Send failed") };
     } catch (e: any) {
