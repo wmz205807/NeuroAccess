@@ -24,8 +24,19 @@ LANG_NAME_MAP = {
 
 # ── OpenRouter 配置 ─────────────────────────────────────
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
+
+# 研究档「扩展重写」的提示后缀。
+# 2026-10-05：抽成模块常量，供「并行预取」与「按需兜底」共用同一份文本
+# （过去它是就地拼在长度校验分支里，只能在首批返回之后串行发起 —— 实测白等 +7.16s）。
+RESEARCH_EXPANSION_SUFFIX = (
+    "\n\n[EXPANSION REQUEST] The previous output was too short. "
+    "Expand each paragraph with deeper technical detail: include precise frequency bands, "
+    "amplitude relationships, dominant rhythm and its typical physiological correlate, "
+    "data-quality caveats per weak channel group, and methodological limitations. "
+    "Aim for AT LEAST 60% longer than the student-tier explanation."
+)
 
 # Beginner 禁止术语（中英文）——只禁真正深奥的术语；
 # 允许 channel/电极/采样率/frequency/alpha/beta 等描述性词（AI 需要它们描述数据本身）
@@ -59,6 +70,13 @@ def call_openrouter(prompt: str, timeout: int = 30, max_tokens: int = 400) -> Di
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": 0.15,
+                # 2026-10-07 换用推理模型 deepseek/deepseek-v4-flash 后必须关掉推理：
+                # 推理 token 会占用 max_tokens 预算，而本项目各档预算很小
+                # （beginner 200 / student 450 / research 1500），预算被推理吃光后
+                # message.content 会直接返回 JSON null —— 实测导致三档全部回退模板。
+                # 关掉后 reasoning_tokens=0，全部预算用于正文，行为与原先非推理模型一致；
+                # 提示词、max_tokens、清洗链等其余部分一律未动。
+                "reasoning": {"enabled": False},
             },
             timeout=(10, timeout),
         )
@@ -1293,8 +1311,16 @@ def _strip_en_headings(text: str, lang: str) -> str:
             cleaned.append(line)
             continue
         ascii_run = max((len(m.group()) for m in re.finditer(r"[A-Za-z][A-Za-z\s,.\-']{4,}", line)), default=0)
-        if ascii_run >= 8:  # 长英文片段 ≥8 字符 → 整句删除
-            continue
+        if ascii_run >= 8:  # 长英文片段 ≥8 字符
+            # 2026-10-07 修正：原逻辑是「只要出现长英文片段就丢掉整行」，于是句子里
+            # 只要引用一个英文指标名（alpha_over_delta / duration_seconds = 20.0 等）
+            # 整段中文解释就被连坐删除。研究档天然会引用这些字段名，实测被砍掉上百字，
+            # 最终比「进阶档」还短（分档倒挂）。
+            # 改为：只有「整行以英文为主」时才删整行，中文为主的段落保留。
+            _letters = len(re.findall(r"[A-Za-z]", line))
+            _nonspace = len(re.sub(r"\s", "", line))
+            if _nonspace and _letters / _nonspace >= 0.6:
+                continue
         cleaned.append(line)
     text = "\n".join(cleaned)
     # 清理多余空行
@@ -1397,9 +1423,21 @@ _SUBJECT_WORDS = [
     "the subject", "the participant",
 ]
 _ADVICE_WORDS = [
-    "建议", "应", "应当", "应该", "最好", "请", "可以尝试", "务必", "需要做", "需进行", "应进行",
+    "建议", "应当", "应该", "最好", "可以尝试", "务必", "需要做", "需进行", "应进行",
     "we recommend", "it is recommended", "you should", "should be done", "we suggest",
     "it is advised", "should perform", "should remove", "should be removed",
+]
+# ⚠️ 2026-10-07 修正：此前列表中还有**裸单字 "应" 与 "请"**，做的是朴素子串匹配，
+# 会误伤「感**应**位置 / 反**应** / 对**应** / **应**用 / 申**请** / 邀**请**」这类普通词 ——
+# 只要句中含这些词，整句就被当成「建议句」删除。实测：换 deepseek 后 beginner 档
+# 的整段输出（含「8 个感应位置」）被整句删除 ⇒ 4/4 回退模板。
+# 这不是策略问题（策略禁止的是「面向个体的建议/指导」），而是匹配过宽。
+# 改法：单字改为「只匹配真正的建议句式」，多字词条保持不变 ⇒ 策略语义不变、误伤消失。
+_ADVICE_RES = [
+    # 「应」只在后接建议性动词时才算建议
+    re.compile(r"应(该|当|予|避免|注意|考虑|结合|保持|控制|尽量|确保|检查|降低|提高|调整|增加|减少|优先|先|再|把|将)"),
+    # 「请」同理：后顾断言排除「申请 / 邀请」，否则「申请使用」会被当成「请使用」
+    re.compile(r"(?<![申邀])请(注意|确保|检查|咨询|联系|使用|参考|务必|尝试|及时|先|再)"),
 ]
 
 
@@ -1420,13 +1458,44 @@ def _strip_invalid_sentences(text: str) -> str:
             # 个体状态解读：句中有具体对象 + 心智词
             if any(w in low for w in _SUBJECT_WORDS) and any(w in low for w in _MENTAL_WORDS):
                 continue
-            # 建议/指导句
-            if any(w in low for w in _ADVICE_WORDS):
+            # 建议/指导句（多字词条做子串匹配 + 单字「应」「请」走建议句式正则，避免误伤普通词）
+            if any(w in low for w in _ADVICE_WORDS) or any(p.search(low) for p in _ADVICE_RES):
                 continue
             kept_segs.append(seg)
         if kept_segs:
             kept.append("".join(kept_segs))
     return "\n\n".join(kept).strip()
+
+
+def _research_expansion_text(a: Dict, lang: str) -> str:
+    """研究档「扩展重写」—— 与串行版本**完全同一份提示、同一套参数、同一条清洗链**，
+    只是把发起时机从「长度校验失败后串行再发」改成「与首批三层同时并行发出」。
+
+    可行性：扩展提示只由分析结果 a 与语言决定，**不依赖其它档位的输出**，因此提前发起
+    不会改变任何判定。取用条件（`len(ext) > len(student) * 1.5` 才替换）保持原样 ——
+    用户看到的内容不变，省掉的是那次串行等待（实测 +7.16s，且日志显示历史上 9/9 次
+    扩展结果最终都被 `research replaced by template` 覆盖，等于纯白等）。
+
+    失败返回空串，调用方按原有逻辑继续（不满足条件就不替换）。
+    """
+    try:
+        ext = call_ollama(_build_prompt(a, "research", lang) + RESEARCH_EXPANSION_SUFFIX,
+                          timeout=120, max_tokens=2000)
+        txt = str(ext.get("text", "")).strip() if ext.get("success") else ""
+        if not txt:
+            return ""
+        return _dedup_sentences(
+            _strip_invalid_sentences(
+                _strip_meta_sentences(
+                    _soften_claims(
+                        _strip_en_headings(_strip_disclaimers(txt), lang)
+                    )
+                )
+            )
+        )
+    except Exception as e:
+        print(f"[explanations] research expansion prefetch failed {lang}: {e}", flush=True)
+        return ""
 
 
 def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]:
@@ -1489,10 +1558,15 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
             print(f"[explanations] fallback {level}({lang}): exception {e}", flush=True)
             return fallbacks[level]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    # 2026-10-05：research 档的「扩展重写」改为与首批**并行预取**（原来是在长度比例
+    # 不达标后才串行再发一次，实测白等 +7.16s）。扩展提示不依赖其它档位输出，提前发起
+    # 不改变任何判定；取用条件与清洗链保持原样 ⇒ 用户看到的内容不变，只去掉那段等待。
+    # 提交顺序放在前三者之后，取用结果放在最后 —— 总耗时 ≈ max(四次)，而不是相加。
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         future_beginner = executor.submit(_call_level, "beginner")
         future_student  = executor.submit(_call_level, "student")
         future_research = executor.submit(_call_level, "research")
+        future_research_long = executor.submit(_research_expansion_text, a, lang)
         for key, future in [("beginner", future_beginner), ("student", future_student), ("research", future_research)]:
             try:
                 # 130s 必须 > call_ollama 的 100s：研究档 max_tokens 大、生成慢，
@@ -1501,6 +1575,12 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
             except Exception as e:
                 print(f"[explanations] fallback {key}({lang}): future timeout/err {e}", flush=True)
                 results[key] = fallbacks[key]
+        # 并行预取的扩展文本：此时首批已经跑完，它多半也已完成（内部 120s 超时兜底）
+        try:
+            research_long = future_research_long.result(timeout=130)
+        except Exception as e:
+            print(f"[explanations] research expansion future err {lang}: {e}", flush=True)
+            research_long = ""
 
     # 长度顺序兜底：保证 beginner < student < research（用户已多次反馈"研究档怎么会比学习档短"）
     # 若 LLM 不遵守隐含长度规则，对偏短的档做一次"扩展"再生成，最坏情况用模板填充
@@ -1517,30 +1597,15 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
             if not (_bn < _st):
                 results["student"] = fallbacks["student"]
                 _st = len(results["student"])
-            # research 不够长于 student*1.5 → 尝试扩展 research（保留 AI student 内容）
+            # research 不够长于 student*1.5 → 用**已并行预取**的扩展文本（保留 AI student 内容）
+            # 2026-10-05：不再就地串行调用 —— 那次调用实测要 +7.16s，而日志显示它产出的文本
+            # 历史上 9/9 次都被后续 `research replaced by template` 覆盖，属于纯等待。
+            # 提示词、max_tokens、清洗链、（>1.5×student 才替换的）取用条件全部保持原样。
             if not (_st * 1.5 < _rs):
                 try:
-                    _ext_prompt = _build_prompt(a, "research", lang) + (
-                        "\n\n[EXPANSION REQUEST] The previous output was too short. "
-                        "Expand each paragraph with deeper technical detail: include precise frequency bands, "
-                        "amplitude relationships, dominant rhythm and its typical physiological correlate, "
-                        "data-quality caveats per weak channel group, and methodological limitations. "
-                        "Aim for AT LEAST 60% longer than the student-tier explanation."
-                    )
-                    _ext = call_ollama(_ext_prompt, timeout=120, max_tokens=2000)
-                    _ext_txt = str(_ext.get("text", "")).strip() if _ext.get("success") else ""
-                    if _ext_txt:
-                        _ext_clean = _dedup_sentences(
-                            _strip_invalid_sentences(
-                                _strip_meta_sentences(
-                                    _soften_claims(
-                                        _strip_en_headings(_strip_disclaimers(_ext_txt), lang)
-                                    )
-                                )
-                            )
-                        )
-                        if _ext_clean and len(_ext_clean) > len(results["student"]) * 1.5:
-                            results["research"] = _ext_clean
+                    _ext_clean = research_long
+                    if _ext_clean and len(_ext_clean) > len(results["student"]) * 1.5:
+                        results["research"] = _ext_clean
                 except Exception as _e:
                     print(f"[explanations] research expansion failed {lang}: {_e}", flush=True)
                 # 扩展后仍不满足比例 → 保留 AI 内容，仅记日志（保证内容质量优先）
@@ -1565,34 +1630,9 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
     except Exception as _e:
         print(f"[explanations] inference fallback exception {lang}: {_e}", flush=True)
 
-    # ── 最终硬性保证：只保证严格递增（beginner < student < research），不压缩内容 ──
-    # 内容质量优先：进阶解释保留 AI 生成内容，仅当严格顺序被打破时才做最小修正。
-    try:
-        _bn, _st, _rs = len(results["beginner"]), len(results["student"]), len(results["research"])
-        if not (_bn < _st < _rs):
-            import re as _re2
-            def _cut_by_sentence(text: str, max_len: int) -> str:
-                segs = _re2.split(r"(?<=[。！？；\n])", text)
-                buf = ""
-                for sg in segs:
-                    if sg and len(buf) + len(sg) <= max_len:
-                        buf += sg
-                    elif sg:
-                        break
-                return buf.strip() or text[:max_len].strip() + "…"
-            # 仅当 student 反而比 research 长时，截断 student 到 research-1（保持严格递增）
-            if len(results["student"]) >= len(results["research"]):
-                results["student"] = _cut_by_sentence(results["student"], max(40, len(results["research"]) - 1))
-            # 仅当 beginner 反而比 student 长时，截断 beginner 到 student-1
-            if len(results["beginner"]) >= len(results["student"]):
-                results["beginner"] = _cut_by_sentence(results["beginner"], max(30, len(results["student"]) - 1))
-            _bn = len(results["beginner"])
-            _st = len(results["student"])
-            _rs = len(results["research"])
-            if not (_bn < _st < _rs):
-                print(f"[explanations] strict-order fallback {lang}: b={_bn} s={_st} r={_rs}", flush=True)
-    except Exception as _e:
-        print(f"[explanations] hard-cut exception {lang}: {_e}", flush=True)
+    # （原有的「严格递增保证」已下移到「追加推测段」之后 —— 见本函数 return 之前。
+    #   2026-10-07：它原先跑在追加推测段之前，而三档追加的推测段长度各不相同，
+    #   追加后会把刚保证好的顺序重新打破 ⇒ 用户看到「第二档比第三档字还多」。）
 
     # ── 每档固定追加"推测可能的情况"专门段 ──
     # 用户要求：入门/进阶/研究三档都必须在 AI 解释里各有一个专门的推测病情部分。
@@ -1618,6 +1658,36 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
             print(f"[explanations] disease section appended to {_k} ({lang})", flush=True)
     except Exception as _e:
         print(f"[explanations] disease-section append exception {lang}: {_e}", flush=True)
+
+    # ── 最终硬性保证：交付前保证三档长度严格递增（beginner < student < research）──
+    # 必须放在「追加推测段」之后：三档追加的推测段长度各不相同，追加会改变顺序。
+    # 内容质量优先 —— 只在顺序真的被打破时，对偏长的那一档按句边界做最小截断。
+    try:
+        _bn, _st, _rs = len(results["beginner"]), len(results["student"]), len(results["research"])
+        if not (_bn < _st < _rs):
+            import re as _re2
+            def _cut_by_sentence(text: str, max_len: int) -> str:
+                segs = _re2.split(r"(?<=[。！？；\n])", text)
+                buf = ""
+                for sg in segs:
+                    if sg and len(buf) + len(sg) <= max_len:
+                        buf += sg
+                    elif sg:
+                        break
+                return buf.strip() or text[:max_len].strip() + "…"
+            # student 反而比 research 长 → 截断 student 到 research-1
+            if len(results["student"]) >= len(results["research"]):
+                results["student"] = _cut_by_sentence(results["student"], max(40, len(results["research"]) - 1))
+            # beginner 反而比 student 长 → 截断 beginner 到 student-1
+            if len(results["beginner"]) >= len(results["student"]):
+                results["beginner"] = _cut_by_sentence(results["beginner"], max(30, len(results["student"]) - 1))
+            _bn = len(results["beginner"])
+            _st = len(results["student"])
+            _rs = len(results["research"])
+            print(f"[explanations] strict-order enforced (final) {lang}: b={_bn} s={_st} r={_rs}"
+                  + ("" if _bn < _st < _rs else "  ⚠️ still-not-increasing"), flush=True)
+    except Exception as _e:
+        print(f"[explanations] final order exception {lang}: {_e}", flush=True)
 
     return results
 

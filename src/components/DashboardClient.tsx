@@ -509,7 +509,7 @@ function DashboardInner() {
           aiFailCountRef.current = 0;
           setAiStatus({
             online: true,
-            model: "qwen-2.5-7b",
+            model: "deepseek-v4-flash",
             mode: t("apiMode"),
           });
         } else {

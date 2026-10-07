@@ -18,14 +18,17 @@ type ThemeContextType = {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // 惰性初始化：客户端直接读 localStorage，避免首帧用默认 light 覆盖已保存的 dark 造成"闪亮"
+  // 惰性初始化：客户端直接读 localStorage，避免首帧用错主题造成闪色。
+  // 默认深色 —— 对齐 BCI World「深空科技蓝」的第一印象。
+  // 用户显式选过 light/dark/system 就完全尊重其选择，只有「从未设置过」才落到 dark。
   const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "light";
+    if (typeof window === "undefined") return "dark";
     try {
       const saved = localStorage.getItem("theme") as Theme | null;
-      return saved === "dark" || saved === "system" ? saved : "light";
+      if (saved === "light" || saved === "dark" || saved === "system") return saved;
+      return "dark";
     } catch {
-      return "light";
+      return "dark";
     }
   });
 

@@ -528,7 +528,7 @@ def enhance_analysis(raw: Dict[str, Any], language: str = "zh") -> Dict[str, Any
 @app.get("/")
 def root():
     return {"success": True, "service": "NeuroAccess Backend", "version": "2.0.0",
-            "model": "qwen-2.5-7b-instruct"}
+            "model": "deepseek/deepseek-v4-flash"}
 
 @app.get("/api/health")
 @app.get("/health")  # 兼容旧版健康检查

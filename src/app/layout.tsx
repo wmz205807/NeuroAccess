@@ -127,8 +127,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#f4f7fc" },
+    { media: "(prefers-color-scheme: dark)", color: "#060a12" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -171,7 +171,9 @@ export default async function RootLayout({
     <html lang={initialLang} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{
-          __html: `(function(){try{var t=localStorage.getItem("theme");if(t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}})()`
+          // 默认深色（对齐 BCI World 的深空科技蓝）：未存过 theme 时直接上 dark；
+          // 用户显式选过 light/dark/system 则完全尊重其选择，不做任何覆盖。
+          __html: `(function(){try{var t=localStorage.getItem("theme");var dark=t?(t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches)):true;if(dark)document.documentElement.classList.add("dark")}catch(e){}})()`
         }} />
         <script
           type="application/ld+json"

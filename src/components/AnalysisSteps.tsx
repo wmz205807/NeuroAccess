@@ -23,6 +23,19 @@ import { CheckCircle2, Loader2, Circle } from "lucide-react";
  *   ② 「第 N / 6 步」与真实已用秒数（本地计时，只读时钟，不参与进度推算）；
  *   ③ 每一步下面补一行大白话说明，讲清这一步到底在算什么（教育平台，顺便当讲解）；
  *   ④ 上传步的百分比直接填进第 1 段的宽度里，不再只是右侧一个小数字。
+ *
+ * 2026-10-05 改版（用户：「分析时每一个阶段要停留一小段」）—— 生产实测：服务器把
+ * 第 2~5 步全部干完只要 0.3~1.5 秒（metadata 0.000s；waveform/bands/features/
+ * assembling 四段合计 0.14s），而本组件每 600ms 才读到一次阶段 ⇒ 真实步号一步
+ * 跨过好几格，观感是「唰一下到最后一步」。新增「展示队列」：展示步号一格格向真实
+ * 目标推进，每格至少停留 MIN_DWELL_MS。经过的每一格都是后端真实上报过的阶段，
+ * 展示永不超过真实目标 —— 仍是真实进度，只是把节奏拉平到人眼可读。
+ *
+ * ⚠️ 硬约束（用户：「不要刻意延长整体分析时间」）—— 队列**只决定六行里高亮哪一行**，
+ * **绝不参与「分析是否仍在进行」的判定**：`running` 完全由后端真实状态推导，与
+ * `shown` 无关。因此真实分析一结束，本组件立刻随父组件卸载，绝不为播完剩余格而
+ * 多停留哪怕一帧；分析本身快时，队列来不及走完就结束，也不会去补播。
+ * 换句话说，这个改动对端到端耗时的增量**恒为 0**（不是「很小」，是结构上不可能）。
  * ──────────────────────────────────────────────────────────────────────────── */
 
 type STEPS_L = "zh" | "en" | "es" | "fr" | "de" | "ja" | "ko";
@@ -131,6 +144,19 @@ export const STEP_TXT: Record<STEPS_L, {
   },
 };
 
+/** 后端阶段名 → 步骤序号（0–5）的映射表。这个顺序就是后端真实执行顺序，不要调换。 */
+export const STAGE_TO_STEP: Record<string, number | undefined> = {
+  receiving: 1,
+  metadata: 1,
+  signal: 2,
+  waveform: 3,
+  bands: 3,
+  features: 3,
+  assembling: 3,
+  report: 4,
+  ai: 5,
+};
+
 /** 把后端上报的真实阶段折算成 0–5 的步骤序号；6 = 全部完成，-1 = 未开始/失败 */
 export function stepIndex(status: Status, stage?: string, uploadPct?: number): number {
   if (status === "pending" || status === "failed") return -1;
@@ -138,19 +164,12 @@ export function stepIndex(status: Status, stage?: string, uploadPct?: number): n
   if (status === "reading") return 0;
   if (status === "analysisReady" || status === "explaining") return 5;
   if (typeof uploadPct === "number" && uploadPct < 100) return 0;
-  switch (stage) {
-    case "receiving":
-    case "metadata":   return 1;
-    case "signal":     return 2;
-    case "waveform":
-    case "bands":
-    case "features":
-    case "assembling": return 3;
-    case "report":     return 4;
-    case "ai":         return 5;
-    default:           return 1;
-  }
+  const s = STAGE_TO_STEP[stage ?? ""];
+  return s === undefined ? 1 : s;
 }
+
+/** 每一步的最小停留时长（毫秒）—— 让每次分析都看得清每一步。 */
+const MIN_DWELL_MS = 500;
 
 /**
  * 分析进行中的分步进度。只在 status 处于处理中时渲染有意义的内容。
@@ -166,8 +185,55 @@ export default function AnalysisSteps({
 }) {
   const { lang } = useLang();
   const st = STEP_TXT[(lang as STEPS_L)] || STEP_TXT.en;
-  const cur = stepIndex(status, stage, uploadPct);
-  const running = cur >= 0 && cur <= 5;
+
+  // ── 展示用步号：真实目标 + 最小停留 ───────────────────────────────────
+  // 背景（2026-10-05 生产实测）：服务器把第 2~5 步全部干完只要 0.3~1.5 秒，
+  // 而进度轮询是每 600ms 一次（metadata 实测 0.000s、waveform/bands/features/
+  // assembling 四段合计仅 0.14s）⇒ 真实步号会「一步跨过好几格」，用户看到的
+  // 就是「唰一下到最后一步，中间几步直接过去了」。真实阶段序列本身没问题，
+  // 问题只在呈现节奏。
+  // 做法：不动真实数据流，只在展示层排队 —— 从当前展示格一格格向真实目标
+  // 推进，每格至少停留 MIN_DWELL_MS，保证每一步都看得清。
+  // ⚠️ 这不是「按时间伪造进度」：经过的每一格都是后端真实上报过的阶段
+  // （阶段严格按后端执行顺序单调推进，不存在跳步），且展示永远不超过真实目标。
+  const statusCur = stepIndex(status, stage, uploadPct);
+  const stageCur = STAGE_TO_STEP[stage ?? ""] ?? -1;
+  // 上传字节未满 100% 时 stepIndex 会归一到第 0 步；用 stage 表兜底取较大者，
+  // 免得「后端已报到 assembling，UI 还卡在上传那一格」。
+  const cur = statusCur < 0 ? -1 : Math.min(5, Math.max(stageCur, statusCur));
+
+  // ⚠️「分析是否仍在进行」**只由后端真实状态推导，展示队列不参与**（用户硬约束：
+  // 「不要刻意延长整体分析时间」）。队列只决定「六行里高亮哪一行」，不决定本组件
+  // 何时消失 —— 真实分析一结束，组件立刻随父组件卸载，绝不为播完剩余格多停留一帧；
+  // 分析本身很快时，队列来不及走完就结束，也不补播。对端到端耗时的增量恒为 0。
+  const running = statusCur >= 0 && statusCur <= 5;
+
+  const [shown, setShown] = useState(-1);
+  const shownRef = useRef(-1);
+  const lastRef = useRef(0);
+
+  useEffect(() => {
+    if (!running) {
+      // 复位：下一轮分析从第 1 格重新走，不沿用上一轮的高位
+      shownRef.current = -1;
+      lastRef.current = 0;
+      setShown(-1);
+      return;
+    }
+    if (shownRef.current < 0) {
+      shownRef.current = 0;
+      lastRef.current = Date.now();
+      setShown(0);
+    }
+    const id = setInterval(() => {
+      if (shownRef.current >= cur) return;                     // 已追上真实进度，停下等它
+      if (Date.now() - lastRef.current < MIN_DWELL_MS) return; // 本格还没停够
+      shownRef.current += 1;
+      lastRef.current = Date.now();
+      setShown(shownRef.current);
+    }, 50);
+    return () => clearInterval(id);
+  }, [running, cur]);
 
   // 真实已用时间：只读时钟，不做任何"按时间推进进度"的推断。
   // 计时起点用 ref 记忆，running 翻成 false 时清空，下一轮分析重新计时。
@@ -189,7 +255,7 @@ export default function AnalysisSteps({
   if (!running) return null;
 
   const elapsed = startRef.current !== null ? Math.max(0, Math.floor((Date.now() - startRef.current) / 1000)) : 0;
-  const uploadRunning = cur === 0 && typeof uploadPct === "number" && uploadPct > 0 && uploadPct < 100;
+  const uploadRunning = shown === 0 && typeof uploadPct === "number" && uploadPct > 0 && uploadPct < 100;
   const gap = variant === "card" ? "space-y-2.5" : "space-y-2";
 
   return (
@@ -200,15 +266,15 @@ export default function AnalysisSteps({
           {st.title}
         </span>
         <span className="shrink-0 font-mono text-[10px] font-semibold text-[var(--color-text)]">
-          {st.ofTpl.replace("{n}", String(cur + 1))}
+          {st.ofTpl.replace("{n}", String(shown + 1))}
         </span>
       </div>
 
       {/* 六段式进度条：一眼看出还剩几步 */}
-      <div className="flex gap-1" role="progressbar" aria-valuemin={1} aria-valuemax={6} aria-valuenow={cur + 1}>
+      <div className="flex gap-1" role="progressbar" aria-valuemin={1} aria-valuemax={6} aria-valuenow={shown + 1}>
         {st.steps.map((_, i) => {
-          const done = i < cur;
-          const active = i === cur;
+          const done = i < shown;
+          const active = i === shown;
           return (
             <div
               key={i}
@@ -242,8 +308,8 @@ export default function AnalysisSteps({
       {/* 步骤清单：每步一行名称 + 一行"这一步在算什么"的说明 */}
       <ol className={`mt-3 ${gap}`}>
         {st.steps.map((r, i) => {
-          const isDone = i < cur;
-          const isActive = i === cur;
+          const isDone = i < shown;
+          const isActive = i === shown;
           return (
             <li key={i} className="flex items-start gap-2 text-xs">
               <span className="mt-[1px] shrink-0">

@@ -60,7 +60,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="h-14 flex items-center px-4 border-b border-[var(--color-border)]">
         <div className="flex items-center gap-2.5">
-          <img src="/neuroaccess-logo-small.png" alt="NeuroAccess" width={32} height={32} className="w-8 h-8 rounded-lg object-contain bg-[var(--color-bg)]" />
+          <img src="/neuroaccess-logo-small.png" alt="NeuroAccess" width={32} height={32} className="w-8 h-8 rounded-lg object-contain bg-[var(--color-surface-2)] border border-[var(--color-border)]" />
           {!collapsed && (
             <span className="font-bold tracking-tight text-[var(--color-text)]">NeuroAccess</span>
           )}
@@ -80,8 +80,8 @@ export default function Sidebar() {
                   href={item.href}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors duration-200 ${
                     isActive
-                      ? "bg-[var(--color-primary)] text-[var(--color-surface)] shadow-lg shadow-[var(--color-primary)_/10]"
-                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]"
+                      ? "bg-[var(--color-accent)] text-[var(--color-bg)] font-semibold"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)]"
                   }`}
                 >
                   <Icon className="w-5 h-5 flex-shrink-0" />
@@ -101,8 +101,8 @@ export default function Sidebar() {
             collapsed ? "justify-center" : ""
           } ${
             settingsOpen
-              ? "bg-[var(--color-primary)] text-[var(--color-surface)]"
-              : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]"
+              ? "bg-[var(--color-accent)] text-[var(--color-bg)] font-semibold"
+              : "text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)]"
           }`}
         >
           <Settings className="w-5 h-5 flex-shrink-0" />
@@ -111,7 +111,7 @@ export default function Sidebar() {
 
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center justify-center p-2 rounded-xl hover:bg-[var(--color-bg)] transition-colors"
+          className="w-full flex items-center justify-center p-2 rounded-xl hover:bg-[var(--color-hover-bg)] transition-colors"
         >
           {collapsed ? (
             <ChevronRight className="w-4 h-4 text-[var(--color-text-secondary)]" />

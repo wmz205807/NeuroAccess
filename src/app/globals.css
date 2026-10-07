@@ -2,6 +2,18 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ============================================================================
+   NeuroAccess · 设计系统
+   整体设计语言参考 BCI World（bciworld.cloud）的「深空科技蓝」：
+     · 暗色 = 深空蓝黑底 #060A12 + 科技蓝 #4D8DFF + 青色高光 #45D8E8（逐字对齐）
+     · 亮色 = 同一套语言的浅色版（冷白底 + 同一支蓝 + 同一支青）
+     · 无投影（改用 1px 细线分隔）· mono 小标签
+     · 纯色底，无网格底纹（2026-10-07 用户要求去掉 88px 网格）
+     · 圆角保留 Tailwind 默认（曾试过「全直角」，用户看过线上后判定「还是圆角好」⇒ 已撤回）
+   这一个文件即可让全站换肤：颜色全部走 --color-* 变量，
+   阴影由 Tailwind 的 --shadow-* 尺度统一收口，因此组件里既有的 shadow-* 类名无需逐个改写。
+   ============================================================================ */
+
 @keyframes draw {
   to {
     stroke-dashoffset: 0;
@@ -67,54 +79,99 @@
 }
 
 @theme {
-  --color-primary: #111827;
-  --color-primary-light: #1f2937;
-  --color-bg: #f9fafb;
+  /* ── 亮色：深空科技蓝的浅色版 ─────────────────────────────
+     冷白底 + 深蓝黑墨 + 同一支科技蓝与青色，保持与暗色同一套语言。 */
+  --color-bg: #f4f7fc;
   --color-surface: #ffffff;
-  --color-text: #111827;
-  --color-text-secondary: #6b7280;
-  --color-border: #e5e7eb;
-  --color-hover-bg: #f3f4f6;
+  --color-surface-2: #e9f0fa;
+  --color-text: #0a1322;
+  --color-text-secondary: #586a85;
+
+  /* 1px 细线：bci-world 用蓝调细线替代投影 */
+  --color-border: #d8e3f4;
+  --color-border-strong: #b9ccea;
+
+  --color-hover-bg: #edf3fb;
+
+  --color-primary: #2563eb;
+  --color-primary-light: #1d4ed8;
+  --color-accent: #0b7c8c;
+
+  --color-ok: #0e9d6a;
+  --color-warn: #b0761b;
+  --color-danger: #dc2626;
+
+  /* ── 圆角：交回 Tailwind 默认尺度 ─────────────────────────
+     2026-10-07：这里曾把 --radius-xs…4xl 全部设为 0px 做「全直角」，
+     用户看过线上效果后判定「还是圆角好」⇒ 已撤回。
+     默认值即 rounded-lg 0.5rem / xl 0.75rem / 2xl 1rem / 3xl 1.5rem。
+     ⚠️ 刻意不在此处定义任何 --radius-*，以免日后又被悄悄改方。 */
+
+  /* ── 无投影 ──────────────────────────────────────────────
+     覆盖 Tailwind 的阴影尺度 ⇒ shadow-sm/md/lg/xl/2xl 全部变为透明。
+     层级改用 1px 细线 + 底色差表达（bci-world 的做法）。 */
+  --shadow-2xs: 0 0 0 0 rgb(0 0 0 / 0);
+  --shadow-xs: 0 0 0 0 rgb(0 0 0 / 0);
+  --shadow-sm: 0 0 0 0 rgb(0 0 0 / 0);
+  --shadow-md: 0 0 0 0 rgb(0 0 0 / 0);
+  --shadow-lg: 0 0 0 0 rgb(0 0 0 / 0);
+  --shadow-xl: 0 0 0 0 rgb(0 0 0 / 0);
+  --shadow-2xl: 0 0 0 0 rgb(0 0 0 / 0);
+
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* ── 暗色：BCI World 深空科技蓝（逐字对齐其 style.css 的 :root） ───────── */
 .dark {
-  --color-primary: #f5f5f7;
-  --color-primary-light: #e5e7eb;
-  --color-bg: #0f0f0f;
-  --color-surface: #1a1a1a;
-  --color-text: #f5f5f7;
-  --color-text-secondary: #9ca3af;
-  --color-border: #262626;
-  --color-hover-bg: #2a2a2a;
+  --color-bg: #060a12;
+  --color-surface: #0b111c;
+  --color-surface-2: #101826;
+  --color-text: #e8eef9;
+  --color-text-secondary: #8c9ab3;
+
+  --color-border: rgba(77, 141, 255, 0.16);
+  --color-border-strong: rgba(77, 141, 255, 0.34);
+
+  --color-hover-bg: #101826;
+
+  --color-primary: #4d8dff;
+  --color-primary-light: #86b7ff;
+  --color-accent: #45d8e8;
+
+  --color-ok: #3ddc97;
+  --color-warn: #f5b94d;
+  --color-danger: #ff6b6b;
+
+  color-scheme: dark;
 }
 
-/* 深色模式：选中文本 */
-.dark ::selection {
-  background: #f5f5f7;
-  color: #0f0f0f;
-}
-
-/* 深色模式：滚动条 */
-.dark ::-webkit-scrollbar-thumb {
-  background: #262626;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
+:root {
+  --ease: cubic-bezier(0.22, 0.8, 0.22, 1);
 }
 
 html {
   scroll-behavior: smooth;
+  color-scheme: light;
 }
 
 body {
-  background: var(--color-bg);
+  /* 纯色底 —— 2026-10-07 按用户要求去掉 88px 网格底纹。
+     背景色由 <body className="bg-[var(--color-bg)]"> 与这里共同保证。 */
+  background-color: var(--color-bg);
   color: var(--color-text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* 自定义滚动条 */
+/* 选中文本：青底深字（与 bci-world 一致） */
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* 自定义滚动条 —— 细、低对比、蓝调（bci-world 直接隐藏滚动条，
+   但这里是应用而非阅读页，保留可见滚动条以免用户失去「还有内容」的提示） */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -125,48 +182,79 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--color-border-strong);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: var(--color-primary);
 }
 
-/* 平滑过渡 */
-button, a, input, textarea {
-  transition: all 0.2s ease;
+/* 过渡曲线统一到 bci-world 的缓动 */
+button, a, input, textarea, select {
+  transition: all 0.3s var(--ease);
 }
 
-/* 选中文本颜色 */
-::selection {
-  background: #111827;
-  color: #ffffff;
+/* ── bci-world 惯用法工具类 ───────────────────────────────── */
+
+/* mono 小标签：11px / 字距 .12em / 大写 —— bci-world 全站的小标题排版 */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-/* ── UI 层级系统 ────────────────────────────────── */
-/* 一级：核心指标卡片 */
+/* 细线面板：无投影，hover 只加深边框。不设圆角 —— 由使用处的 rounded-* 决定。 */
+.surface-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  transition: border-color 0.3s var(--ease);
+}
+.surface-panel:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* 青色方块序号 —— bci-world 的 .sec-num / .os-rank 用法 */
+.sec-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ── UI 层级系统 ──────────────────────────────────
+   旧版靠投影表达层级；改为「1px 细线 + 底色差」，圆角回到原值。 */
 .ui-tier-1 {
   padding: 1.5rem;
   font-size: 1.125rem;
   font-weight: 700;
   border-radius: 1rem;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
 }
-/* 二级：图表区域 */
 .ui-tier-2 {
   padding: 1.25rem;
   border-radius: 1rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
-/* 三级：AI 解释 */
 .ui-tier-3 {
   padding: 1rem;
   font-size: 0.875rem;
   line-height: 1.75;
   border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
 }
-/* 四级：元数据 */
 .ui-tier-4 {
   padding: 0.75rem;
   font-size: 0.75rem;
@@ -182,16 +270,16 @@ button, a, input, textarea {
   animation: fadeIn 0.2s ease-out;
 }
 
-/* Plotly modebar 按钮放大更明显 */
+/* Plotly modebar 按钮放大更明显（跟随新配色；圆角恢复原值） */
 .modebar {
   padding: 4px !important;
-  background: rgba(255,255,255,0.92) !important;
+  background: var(--color-surface-2) !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: 8px !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important;
+  box-shadow: none !important;
 }
 .dark .modebar {
-  background: rgba(26,26,26,0.92) !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.40) !important;
+  background: var(--color-surface-2) !important;
 }
 .modebar-btn {
   padding: 4px !important;
@@ -202,9 +290,9 @@ button, a, input, textarea {
   height: 18px !important;
 }
 .modebar-btn:hover {
-  background: rgba(0,0,0,0.08) !important;
+  background: var(--color-hover-bg) !important;
   border-radius: 4px !important;
 }
 .dark .modebar-btn:hover {
-  background: rgba(255,255,255,0.12) !important;
+  background: var(--color-hover-bg) !important;
 }

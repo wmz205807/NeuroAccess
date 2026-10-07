@@ -70,13 +70,13 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
 
   return (
     <>
-    <header className="h-14 bg-[var(--color-surface)]/80 border-b border-[var(--color-border)] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40">
+    <header className="h-14 bg-[var(--color-surface)]/85 backdrop-blur-xl border-b border-[var(--color-border)] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40">
       {/* Left: hamburger + logo */}
       <div className="flex items-center gap-3">
         {/* 移动端菜单按钮 — lg以上隐藏；游客同样可用（游客也需要导航与语言/主题入口） */}
         <button
           onClick={() => setMobileMenuOpen(true)}
-          className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--color-bg)] transition-colors text-[var(--color-text-secondary)]"
+          className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors text-[var(--color-text-secondary)]"
           aria-label="Open menu"
         >
           <Menu className="w-5 h-5" />
@@ -90,7 +90,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
         {/* Background task indicator */}
         {isGenRunning && (
           <Link href="/eeg-simulator"
-            className="flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-2.5 py-1 text-xs text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors">
+            className="flex items-center gap-1.5 rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-2.5 py-1 text-xs font-mono text-[var(--color-primary)] transition-colors hover:border-[var(--color-primary)]">
             <Loader2 className="w-3 h-3 animate-spin" />
             <span className="hidden sm:inline">EEG</span>
             <span>{genState.progress}%</span>
@@ -139,12 +139,12 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
         mobileMenuOpen ? "opacity-100" : "opacity-0"
       }`} onClick={() => setMobileMenuOpen(false)} />
       {/* 面板 */}
-      <div className={`relative z-10 w-72 max-w-[80vw] h-full bg-[var(--color-surface)] shadow-2xl flex flex-col transition-transform duration-250 ease-out ${
+      <div className={`relative z-10 w-72 max-w-[80vw] h-full bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col transition-transform duration-250 ease-out ${
         mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
       }`}>
           <div className="flex items-center justify-between h-14 px-4 border-b border-[var(--color-border)]">
             <span className="text-sm font-semibold text-[var(--color-text)]">NeuroAccess</span>
-            <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-lg hover:bg-[var(--color-bg)] transition-colors">
+            <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors">
               <X className="w-5 h-5 text-[var(--color-text-secondary)]" />
             </button>
           </div>
@@ -160,8 +160,8 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
                       onClick={() => setMobileMenuOpen(false)}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
                         isActive
-                          ? "bg-[var(--color-primary)] text-[var(--color-surface)]"
-                          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]"
+                          ? "bg-[var(--color-accent)] text-[var(--color-bg)] font-semibold"
+                          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)]"
                       }`}
                     >
                       <Icon className="w-5 h-5 flex-shrink-0" />
@@ -176,7 +176,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
           <div className="p-4 border-t border-[var(--color-border)] space-y-1">
             <button
               onClick={() => { setMobileMenuOpen(false); setSettingsOpen(true); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] transition-colors"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
             >
               <Settings className="w-5 h-5 flex-shrink-0" />
               <span className="font-medium">{t("settings")}</span>
@@ -185,7 +185,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
               <Link
                 href="/account"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] transition-colors"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
               >
                 <User className="w-5 h-5 flex-shrink-0" />
                 <span className="font-medium">{t("accountSettings")}</span>
@@ -194,7 +194,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
             {user && (
               <button
                 onClick={() => { setMobileMenuOpen(false); logout(); router.push("/"); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] transition-colors"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
               >
                 <LogOut className="w-5 h-5 flex-shrink-0" />
                 <span className="font-medium">{t("logout")}</span>
