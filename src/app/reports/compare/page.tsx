@@ -228,7 +228,7 @@ export default function ComparePage() {
       className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
     >
       <section className="mx-auto max-w-6xl px-3 sm:px-5 py-4 sm:py-8 pb-[env(safe-area-inset-bottom,16px)]">
         {/* Header */}

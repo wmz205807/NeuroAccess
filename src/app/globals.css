@@ -296,3 +296,118 @@ button, a, input, textarea, select {
 .dark .modebar-btn:hover {
   background: var(--color-hover-bg) !important;
 }
+
+/* ============================================================================
+   交互与反馈基建（2026-10-15）
+   ============================================================================ */
+
+/* ── 1) 键盘焦点可见性 ──────────────────────────────────────
+   此前全站没有任何 :focus-visible 样式（实测命中 0 处）—— 纯键盘用户
+   看不出焦点落在哪个控件上。这是交互反馈的硬缺口，也是 WCAG 2.4.7 的要求。
+   统一用青色高光（--color-accent）画一圈细环。
+   只对 :focus-visible 生效 ⇒ 鼠标点击不会出现，不影响鼠标用户观感。 */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  /* 焦点环必须**立刻**出现。全局 `transition: all .3s` 会把 outline 也一起补间，
+     实测焦点环要 0.3s 才从默认的 3px/当前色渐变到 2px/青色 —— 键盘连按 Tab 时
+     会明显觉得「环追不上手」。这里只把 outline 相关属性移出过渡，其余过渡保持不变。 */
+  transition-property: color, background-color, border-color, opacity, transform, box-shadow;
+}
+
+/* ── 2) 尊重系统「减少动效」偏好 ────────────────────────────
+   此前 0 处处理。开启该开关的用户（前庭敏感、晕动症等）会看到全站的
+   过渡与动画。这里统一压掉；但**刻意保留加载指示器**（.animate-spin）
+   继续转动 —— 它是「正在处理」的唯一反馈，停掉会让用户以为卡死。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html {
+    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 1.2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* ── 3) 「处理中」状态：统一鼠标指针 ────────────────────────
+   配合组件上的 aria-busy="true"：既给视觉反馈，也让辅助技术知道正忙。 */
+[aria-busy="true"] {
+  cursor: progress;
+}
+
+/* ── 3.5) 按钮的「按下回弹」动态反馈（2026-10-15）────────────
+   此前按钮基本只有 hover:opacity-90 —— 按下去毫无反馈，手感是"死的"。
+   这里统一加按压反馈：
+   · 用**独立属性 `scale`**（不是 transform）⇒ 不会覆盖已有的
+     Tailwind transform 工具类，也不会打架 framer-motion 的内联 transform。
+   · 过渡压到 0.18s —— 全局那套 0.3s 对"按压"这种瞬时反馈太慢，会发黏。 */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  transition-property: color, background-color, border-color, opacity, box-shadow, filter, transform, scale;
+  transition-duration: 0.18s;
+  transition-timing-function: cubic-bezier(0.22, 0.8, 0.22, 1);
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  scale: 0.97;
+}
+
+/* ── 3.6) 应用外壳的高度（移动端关键）──────────────────────────
+   `h-screen` 就是 `100vh`，而**手机浏览器的 100vh 包含地址栏区域** ——
+   iOS Safari / Chrome Android 上地址栏占掉约 60~110px，于是外壳底部
+   （页脚、底部按钮）会被压到地址栏后面，够不着。
+   `100dvh` 跟随「真实可视高度」并随地址栏收放实时变化。
+   不支持的浏览器自动回退到上面的 100vh。 */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* ── 3.7) 移动端硬化（iOS 专属坑）─────────────────────────────
+   ① **输入框聚焦自动放大**：iOS Safari 对 font-size < 16px 的 input/textarea/select
+      在获得焦点时会把整页放大，且失焦后**不缩回**，用户就被困在放大的页面里。
+      全站输入框原多为 text-sm(14px) 或继承更小 ⇒ 在触屏设备上统一提到 16px。
+      用 @media (pointer: coarse) 只影响触屏，桌面端排版一点不动。
+   ② `touch-action: manipulation`：去掉 300ms 点击延迟，并禁掉「双击缩放」——
+      按钮连点两下不会再莫名放大页面。
+   ③ `-webkit-text-size-adjust: 100%`：防止部分 iOS 版本在横竖屏切换时擅自放大正文。 */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  button,
+  [role="button"],
+  a[href],
+  label {
+    touch-action: manipulation;
+  }
+}
+
+/* ── 4) 路由骨架屏的「延迟淡入」────────────────────────────
+   骨架屏若在几十毫秒的快速导航里闪现一下，比不显示更糟。
+   这里让它先保持透明、120ms 后才淡入 ⇒ 只有**真的在等**的时候才现身
+   （预取命中 / 本地快的导航根本看不到它）。 */
+@keyframes skeletonFadeIn {
+  to {
+    opacity: 1;
+  }
+}
+.skeleton-delayed {
+  opacity: 0;
+  animation: skeletonFadeIn 0.18s ease-out 0.12s forwards;
+}

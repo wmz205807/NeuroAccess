@@ -126,7 +126,14 @@ function saveParams(p: any) {
 }
 
 // ── 命名自定义预设：保存到账号（服务器同步）+ 本地缓存 ──────────────
+// 2026-10-18：本地缓存**必须按用户隔离**。
+// 原来 key 是全局的 `neuroaccess-sim-presets`，于是同一个浏览器里
+// A 账号保存的预设，游客模式或另一个账号登录后**照样会看到**（用户报的
+// 「游客登录自定义里面还有个预设」就是这个）。
+// 现在按 uid 分键；未登录用独立的 `:guest` 键，互不串味。
 const PRESETS_KEY = "neuroaccess-sim-presets";
+const presetKey = (userId?: string | number) =>
+  `${PRESETS_KEY}:${userId === undefined || userId === null ? "guest" : "u" + userId}`;
 interface SavedPreset { name: string; params: any; }
 /** 模拟器时长上限 10 秒：加载任何来源的参数都钳制 */
 function clampDuration(p: any): any {
@@ -134,17 +141,31 @@ function clampDuration(p: any): any {
   const d = Number(p.duration_sec);
   return { ...p, duration_sec: Number.isFinite(d) ? Math.min(10, Math.max(1, d)) : 10 };
 }
-function loadPresetsLocal(): SavedPreset[] {
+function loadPresetsLocal(userId?: string | number): SavedPreset[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(PRESETS_KEY);
+    const raw = localStorage.getItem(presetKey(userId));
     const arr = raw ? JSON.parse(raw) : [];
     return Array.isArray(arr) ? arr.filter(p => p && typeof p.name === "string" && p.params) : [];
   } catch { return []; }
 }
-/** 拉取预设：服务器优先（跨设备同步），本地有而服务器没有的自动迁移合并 */
-async function fetchPresets(): Promise<SavedPreset[]> {
-  const local = loadPresetsLocal();
+/** 拉取预设：服务器优先（跨设备同步），本账号本地有而服务器没有的自动迁移合并 */
+async function fetchPresets(userId?: string | number): Promise<SavedPreset[]> {
+  // 2026-10-18 一次性迁移：旧版本把预设写在**全局** key 里。
+  // 只有**已登录**用户才把它搬进自己的作用域（游客永远不读全局 key），
+  // 搬完就删掉全局 key，避免之后再被别的账号读到。
+  if (typeof window !== "undefined" && userId !== undefined && userId !== null) {
+    try {
+      const legacy = localStorage.getItem(PRESETS_KEY);
+      if (legacy) {
+        if (!localStorage.getItem(presetKey(userId))) {
+          localStorage.setItem(presetKey(userId), legacy);
+        }
+        localStorage.removeItem(PRESETS_KEY);
+      }
+    } catch {}
+  }
+  const local = loadPresetsLocal(userId);
   try {
     const token = typeof window !== "undefined" ? (localStorage.getItem("neuroaccess-token") || "") : "";
     if (!token) return local;
@@ -152,16 +173,16 @@ async function fetchPresets(): Promise<SavedPreset[]> {
     const data = await resp.json();
     if (data.success && Array.isArray(data.presets)) {
       const server = data.presets.filter((p: any) => p && typeof p.name === "string" && p.params);
-      // 合并：服务器空但本地有旧预设 → 迁移到服务器（避免旧本地数据被覆盖丢失）
+      // 合并：服务器空但本账号本地有旧预设 → 迁移到服务器（避免旧本地数据被覆盖丢失）
       const merged = [...server];
       for (const l of local) {
         if (!merged.some(s => s.name === l.name)) merged.push(l);
       }
       if (merged.length !== server.length || server.length === 0) {
-        await persistPresets(merged); // 同步合并结果回服务器
+        await persistPresets(merged, userId); // 同步合并结果回服务器
       }
       if (typeof window !== "undefined") {
-        try { localStorage.setItem(PRESETS_KEY, JSON.stringify(merged)); } catch {}
+        try { localStorage.setItem(presetKey(userId), JSON.stringify(merged)); } catch {}
       }
       return merged;
     }
@@ -169,9 +190,9 @@ async function fetchPresets(): Promise<SavedPreset[]> {
   return local;
 }
 /** 保存预设：写入服务器账号 + 本地缓存 */
-async function persistPresets(list: SavedPreset[]) {
+async function persistPresets(list: SavedPreset[], userId?: string | number) {
   if (typeof window !== "undefined") {
-    try { localStorage.setItem(PRESETS_KEY, JSON.stringify(list)); } catch {}
+    try { localStorage.setItem(presetKey(userId), JSON.stringify(list)); } catch {}
   }
   try {
     const token = typeof window !== "undefined" ? (localStorage.getItem("neuroaccess-token") || "") : "";
@@ -188,7 +209,7 @@ export default function EegSimulatorPage() {
   const { t } = useLang();
   // 游客（未登录）也可使用模拟器：不要求注册即可生成 / 观察 EEG 信号。
   // 仅「保存预设到账户」需要登录，相关调用本身已具备 token 判空保护。
-  const { loading } = useAuth();
+  const { user, loading } = useAuth();
 
   // ── 生成状态（从 EEGGenerationManager 订阅，独立于组件生命周期）────
   const genState = useSyncExternalStore(
@@ -223,12 +244,14 @@ export default function EegSimulatorPage() {
   const [presetName, setPresetName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
-  // 挂载时从服务器拉取账号预设
+  // 拉取本账号的预设。2026-10-18：**必须等鉴权结果出来再读**，
+  // 否则初始 user 为 undefined，会先按 "guest" 作用域读一次（游客看到别人的预设）。
   useEffect(() => {
+    if (loading) return;
     let cancelled = false;
-    fetchPresets().then((list) => { if (!cancelled) setSavedPresets(list); });
+    fetchPresets(user?.id).then((list) => { if (!cancelled) setSavedPresets(list); });
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.id, loading]);
   useEffect(() => {
     const saved = loadParams();
     if (saved) setParams(clampDuration({ ...DEFAULT_PARAMS, ...saved }));
@@ -248,8 +271,8 @@ export default function EegSimulatorPage() {
   const confirmSavePreset = async () => {
     const name = presetName.trim().slice(0, 10);
     if (!name) return;
-    const list = [...loadPresetsLocal(), { name, params: { ...params } }];
-    await persistPresets(list);
+    const list = [...loadPresetsLocal(user?.id), { name, params: { ...params } }];
+    await persistPresets(list, user?.id);
     setSavedPresets(list);
     setNamingOpen(false);
     setPresetName("");
@@ -263,8 +286,8 @@ export default function EegSimulatorPage() {
   };
   // 删除命名预设（二次确认防误触）
   const removePreset = async (name: string) => {
-    const list = loadPresetsLocal().filter(p => p.name !== name);
-    await persistPresets(list);
+    const list = loadPresetsLocal(user?.id).filter(p => p.name !== name);
+    await persistPresets(list, user?.id);
     setSavedPresets(list);
     setConfirmDelete(null);
   };
@@ -408,7 +431,7 @@ export default function EegSimulatorPage() {
 
   return (
     <motion.div className="min-h-screen bg-[var(--color-bg)]"
-      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.05 }}>
+      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}>
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* ── 状态条 ────────────────────────────────────────────────── */}
         {isRunning && (
@@ -469,7 +492,7 @@ export default function EegSimulatorPage() {
                         }
                       }}
                       disabled={isRunning}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
+                      className={`inline-flex min-h-[44px] items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
                         activePreset === preset.key
                           ? "border-[var(--color-primary)] text-[var(--color-primary)] bg-[var(--color-primary)]/10"
                           : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"

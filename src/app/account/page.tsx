@@ -394,7 +394,7 @@ export default function AccountPage() {
       className="min-h-screen bg-[var(--color-bg)] overflow-y-auto"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
     >
       {/* Header */}
       <header className="h-14 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center px-4">

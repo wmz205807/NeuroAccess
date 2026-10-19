@@ -257,25 +257,62 @@ def fast_preview_window(file_path: str, duration_sec: float = 8.0,
     times = raw.times[:total_n]
     
     # 下采样点数随时长增加：保留足够采样率以显示真实高频细节（避免波形过于平滑、像假的）
-    target_points = min(20000, max(2000, int(round(duration_sec * 80))))
+    # 2026-10-18：**这里原来按 duration*80 定点数，再等间隔丢样本** —— 对真实 EEG 是致命的：
+    #   125s / 160Hz = 20000 个原始样本，target=10000 ⇒ step=2 ⇒ **每 2 个丢 1 个**，
+    #   奈奎斯特从 80Hz 掉到 40Hz，真实脑电里 40~80Hz 的成分**混叠折回低频**
+    #   ⇒ 画出来是"整体还行、放大全是折线"的假波形（用户原话「放大就非常假」）。
+    #   我们自造的测试文件是 10Hz 正弦，没有高频成分，所以看不出问题 —— 这就是
+    #   "你造的文件都渲染很好、真实文件不行"的原因。
+    #   现在按 duration*200 取（上限 30000），常见文件（≤150s @160Hz）**基本不丢样本**；
+    #   确实要丢时也在下面用「按桶取 min/max」而不是等间隔抽样，保留包络、不产生混叠。
+    target_points = min(30000, max(2000, int(round(duration_sec * 200))))
     step = max(1, len(times) // target_points)
     if len(times) // step < 500:
         step = max(1, len(times) // 500)
-    
-    times_plot = times[::step]
+
+    if step <= 1:
+        times_plot = times
+        idx_groups = None
+    else:
+        # 按桶取 min/max（保包络、抗混叠）：每 step 个样本压成 2 个点，
+        # 峰值不会被抽掉，波形不会出现"假折线"。
+        times_plot = []
+        idx_groups = []
+        for b0 in range(0, len(times), step):
+            b1 = min(len(times), b0 + step)
+            times_plot.append(times[b0] + (times[b1 - 1] - times[b0]) / 2 if b1 - b0 > 1 else times[b0])
+            idx_groups.append((b0, b1))
+
     channels_data = {}
-    
+
     for i in range(n_ch):
         x = data_uv[i].copy().astype(np.float64)
         # 仅去直流偏置（减中位数），保留真实振幅
         x = x - np.nanmedian(x)
-        channels_data[ch_names[i]] = x[::step].astype(float).tolist()
-    
+        if idx_groups is None:
+            channels_data[ch_names[i]] = x.astype(float).tolist()
+        else:
+            out = []
+            for (b0, b1) in idx_groups:
+                seg = x[b0:b1]
+                out.append(float(np.min(seg)))
+                out.append(float(np.max(seg)))
+            channels_data[ch_names[i]] = out
+
+    # 桶模式下一个时间点对应 min/max 两个值 ⇒ times 也要翻倍
+    if idx_groups is not None:
+        times_plot_out = []
+        for t in times_plot:
+            times_plot_out.append(t)
+            times_plot_out.append(t)
+    else:
+        times_plot_out = times_plot
+
     return {
-        "times": times_plot.astype(float).tolist(),
+        "times": [float(t) for t in times_plot_out],
         "channels": channels_data,
         "sampling_rate": sfreq,
-        "duration_seconds": float(times_plot[-1]) if len(times_plot) > 0 else 0.0,
+        "duration_seconds": float(times_plot_out[-1]) if len(times_plot_out) > 0 else 0.0,
         "channel_names": ch_names,
     }
 

@@ -41,6 +41,12 @@ export default function ReportEEGChart({ reportFileName, analysis, id }: ReportE
   const [panY, setPanY] = useState(0);
   const [isPanMode, setIsPanMode] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  // 2026-10-18：按**通道**分页。63 通道挤进一屏只有 10px/通道，波形糊成实心带子（用户说「假」）。
+  // 每屏最多 20 条，行高回到 22px，波形细节才看得见。用按钮翻，不走滚动。
+  const [chPage, setChPage] = useState(0);
+  // 2026-10-19：20 → 10。20 条/屏时每条波形在屏上仍显拥挤（用户对比 8 通道测试文件
+  // 后判「不一样」）；10 条/屏每条波形可分到的显示空间翻倍，观感对齐测试文件。
+  const CH_PER_PAGE = 10;
   const dragStart = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   // 指针（鼠标/触摸）状态表：支持单指/单键拖拽平移、双指捏合缩放
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -63,38 +69,64 @@ export default function ReportEEGChart({ reportFileName, analysis, id }: ReportE
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      // 本地已有波形预览：立即同步渲染（零延迟，本地波形已降采样到足够真实），不发请求
-      const localChannels = analysis?.waveform_preview?.channels;
-      const hasLocalData = !!analysis?.band_waveforms || (localChannels && typeof localChannels === "object" && Object.keys(localChannels).length > 0);
-      if (hasLocalData) {
-        const localSvg = buildWaveformSvg(analysis, currentPage);
-        if (!cancelled) {
-          assignUrl(localSvg ? svgToDataUrl(localSvg) : null);
-          setLoading(false);
+      const load = async () => {
+        // 2026-10-18 最终结论（把整条数据链摸清后才定的）：
+        //   analysis.py 的 fast_preview_window 是 **80 点/秒**（duration*80，上限 20000），
+        //   ⇒ **DB 里那份是稠密的**（125s → 10000 点）。
+        //   但 /api/analyze 的**响应**还会再走一次 _downsample_waveform_preview(800)，
+        //   按「1.5MB ÷ (9×通道数)」卡点数 ⇒ 63 通道只剩 ~21 点/秒 ⇒ **客户端手里是稀的**。
+        //   ⇒ 结论：**服务器 SVG（读 DB，稠密）才是对的**；本地自绘只适合通道少的短文件。
+        //   之前那条"本地已有波形就已降采样到足够真实"的注释不成立（对多通道尤其不成立）。
+        const localWp = analysis?.waveform_preview;
+        const localChannels = localWp?.channels;
+        const hasLocalData = !!analysis?.band_waveforms || (localChannels && typeof localChannels === "object" && Object.keys(localChannels).length > 0);
+        // 没有 reportId（本地临时分析、未落库）才只能用本地数据凑合
+        if (!reportId && hasLocalData) {
+          const localSvg = buildWaveformSvg(analysis, currentPage);
+          if (!cancelled) {
+            assignUrl(localSvg ? svgToDataUrl(localSvg) : null);
+            setLoading(false);
+          }
+          return;
         }
-        return;
-      }
-      // 本地无数据：回退服务端分页（无 reportId 直接放弃）
+        // 本地无数据：回退服务端分页（无 reportId 直接放弃）
       if (!reportId) {
         if (!cancelled) { assignUrl(null); setLoading(false); }
         return;
       }
-      const serverUrl = `/api/waveform-image?rid=${encodeURIComponent(reportId)}&page=${currentPage}&_t=${Date.now()}`;
+      // 2026-10-18：**取 DB 原始波形数据，用前端同一套渲染器画** ——
+      // 用户要求「完全一样的渲染效果」（和之前发给他的样例逐像素一致）。
+      // 之前这里请求 /api/waveform-image（后端另有一套渲染器，行高/网格/线宽都不同），
+      // 所以"整体还行但一看就和样例不一样"。改成拿数据自己画，渲染器只有一套。
+      const fallbackLocal = () => {
+        const localSvg = hasLocalData ? buildWaveformSvg(analysis, currentPage) : null;
+        assignUrl(localSvg ? svgToDataUrl(localSvg) : null);
+      };
       try {
-        const resp = await fetch(serverUrl);
-        const text = await resp.text();
+        const resp = await fetch(
+          `/api/waveform-data?rid=${encodeURIComponent(reportId)}&page=${currentPage}&ch0=${chPage * CH_PER_PAGE}&nch=${CH_PER_PAGE}`
+        );
+        const j = await resp.json();
         if (!cancelled) {
-          if (resp.ok && text.includes("<svg") && !isPlaceholderSvg(text)) {
-            const blob = new Blob([text], { type: "image/svg+xml" });
-            assignUrl(URL.createObjectURL(blob));
+          if (j?.success && j.channels && Array.isArray(j.times) && j.times.length > 1) {
+            const durWin = Math.abs(j.times[j.times.length - 1] - j.times[0]) || 0;
+            const shim = {
+              waveform_preview: {
+                channels: j.channels,
+                times: j.times,
+                duration_seconds: durWin,
+                sampling_rate: j.samplingRate,
+              },
+            };
+            const svg = buildWaveformSvg(shim, 0);
+            assignUrl(svg ? svgToDataUrl(svg) : null);
           } else {
-            assignUrl(null);
+            fallbackLocal();
           }
           setLoading(false);
         }
       } catch {
-        if (!cancelled) { assignUrl(null); setLoading(false); }
+        if (!cancelled) { fallbackLocal(); setLoading(false); }
       }
     };
     setLoading(true);
@@ -107,7 +139,7 @@ export default function ReportEEGChart({ reportFileName, analysis, id }: ReportE
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportId, currentPage, analysis]);
+  }, [reportId, currentPage, chPage, analysis]);
 
   const imageUrl = effectiveUrl;
 
@@ -233,12 +265,37 @@ export default function ReportEEGChart({ reportFileName, analysis, id }: ReportE
                onWheel={onWheel}
                className={`w-full bg-[var(--color-bg)] overflow-hidden ${isPanMode ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}
                style={{ minHeight: 200, maxHeight: "75vh", touchAction: isPanMode ? "none" : "auto" }}>
-            <img ref={imgRef} src={imageUrl} alt="EEG Waveform" draggable={false} className="block h-auto select-none"
-                 style={{ transform: `translate(${panX}px, ${panY}px) scale(${scale})`, transformOrigin: "0 0", width: "auto", height: "auto", maxWidth: "100%" }} />
+            {/* 2026-10-18：**整图自适应放下，不要滚动**（用户原话：「上下宽度必须通过平移滑动
+                才能看到下面的」= 不想要这个）。宽高同时约束在容器内，保持比例整体缩放，
+                63 通道也能一屏看全。缩放/平移按钮仍可放大细看。 */}
+            <img ref={imgRef} src={imageUrl} alt="EEG Waveform" draggable={false} className="block h-auto select-none mx-auto"
+                 style={{ transform: `translate(${panX}px, ${panY}px) scale(${scale})`, transformOrigin: "0 0", width: "auto", height: "auto", maxWidth: "100%", maxHeight: "72vh", objectFit: "contain" }} />
           </div>
         ) : (
           <div className="flex items-center justify-center h-48 text-[var(--color-text-secondary)] text-sm">
             <Waves className="h-8 w-8 mr-2 opacity-50" />{t("noEegData")}
+          </div>
+        )}
+        {/* 2026-10-19：按通道分页，每屏 10 条（原 20 条仍显拥挤）。用按钮翻页（不走滚动）。 */}
+        {nTotal > CH_PER_PAGE && (
+          <div className="flex items-center justify-center gap-3 px-5 py-2 border-t border-[var(--color-border)]">
+            <button
+              onClick={() => { setChPage(p => Math.max(0, p - 1)); setPanX(0); setPanY(0); setScale(1); }}
+              disabled={chPage <= 0}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)]"
+            >
+              <ChevronLeft size={14} />{t("prevPage")}
+            </button>
+            <span className="text-xs text-[var(--color-text-secondary)] font-mono">
+              {chPage * CH_PER_PAGE + 1}–{Math.min(nTotal, (chPage + 1) * CH_PER_PAGE)} / {nTotal}
+            </span>
+            <button
+              onClick={() => { setChPage(p => Math.min(Math.ceil(nTotal / CH_PER_PAGE) - 1, p + 1)); setPanX(0); setPanY(0); setScale(1); }}
+              disabled={chPage >= Math.ceil(nTotal / CH_PER_PAGE) - 1}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)]"
+            >
+              {t("nextPage")}<ChevronRight size={14} />
+            </button>
           </div>
         )}
         {canPaginate && (

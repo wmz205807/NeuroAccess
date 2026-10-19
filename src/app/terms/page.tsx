@@ -14,7 +14,7 @@ export default function TermsOfService() {
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
-      <Link href="/" className="mb-8 inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">
+      <Link href="/" className="mb-8 inline-flex min-h-[44px] items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">
         <ArrowLeft className="w-4 h-4" />
         {t("backToHome")}
       </Link>

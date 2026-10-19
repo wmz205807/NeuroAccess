@@ -9,6 +9,8 @@ import Link from "next/link";
 import { translations } from "@/lib/translations";
 import AuthSettingsBar from "@/components/AuthSettingsBar";
 import TurnstileModal from "@/components/TurnstileModal";
+import DownloadDataButton from "@/components/DownloadDataButton";
+import { Loader2, HelpCircle } from "lucide-react";
 
 interface LoginFormProps {
   lang: string;
@@ -215,13 +217,15 @@ export default function LoginForm({ lang }: LoginFormProps) {
       className="min-h-full flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
     >
       <div className="absolute top-4 right-4 z-20">
         <AuthSettingsBar />
       </div>
 
-      <div className="w-full max-w-md p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto">
+      {/* 2026-10-18：小屏上卡片原来会被右上角「设置」浮标压住（浮标是 absolute top-4）。
+          这里给卡片留出顶部空间；sm 以上布局不变。 */}
+      <div className="w-full max-w-md mt-12 sm:mt-0 p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto">
         <div className="mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs leading-relaxed text-[var(--color-text)]">
           {tf("siteIntro", "")}
           <span className="mt-2 block font-semibold text-blue-600 dark:text-blue-400 text-[11px]">{tf("freePlatform", "")}</span>
@@ -250,7 +254,7 @@ export default function LoginForm({ lang }: LoginFormProps) {
                   className="w-full px-3.5 py-2.5 pr-10 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
                   placeholder={tf("password", "Password")} required />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0}
                   aria-label={showPassword ? "Hide password" : "Show password"}>
                   {showPassword ? (
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg>
@@ -259,7 +263,7 @@ export default function LoginForm({ lang }: LoginFormProps) {
                   )}
                 </button>
               </div>
-                <button type="button" onClick={switchToCodeMode} className="mt-1.5 text-xs text-[var(--color-primary)] hover:opacity-80 transition-opacity">
+                <button type="button" onClick={switchToCodeMode} className="mt-1.5 inline-flex min-h-[44px] items-center text-xs text-[var(--color-primary)] hover:opacity-80 transition-opacity">
                   {tf("useCodeLogin", "Log in with code")}
                 </button>
             </div>
@@ -270,9 +274,13 @@ export default function LoginForm({ lang }: LoginFormProps) {
               </div>
             )}
 
-            <button type="submit" disabled={submitting}
-              className="w-full py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
-              {submitting ? "..." : tf("loginButton", "Login")}
+            <button type="submit" disabled={submitting} aria-busy={submitting}
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
+              {submitting ? (
+                <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                tf("loginButton", "Login")
+              )}
             </button>
           </form>
         ) : (
@@ -308,9 +316,13 @@ export default function LoginForm({ lang }: LoginFormProps) {
               </div>
             )}
 
-            <button type="submit" disabled={submitting}
-              className="w-full py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
-              {submitting ? "..." : tf("loginButton", "Login")}
+            <button type="submit" disabled={submitting} aria-busy={submitting}
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
+              {submitting ? (
+                <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                tf("loginButton", "Login")
+              )}
             </button>
 
             <button type="button" onClick={switchToPasswordMode}
@@ -330,12 +342,31 @@ export default function LoginForm({ lang }: LoginFormProps) {
           {tf("loginHint", "You will be redirected after login.")}
         </p>
 
+        {/* 2026-10-18：用户要求 —— 在登录页告诉「普通人没有 EEG 文件怎么办」，
+            并给出直接去下载测试文件的入口（复用既有的下载弹窗，不新增页面）。 */}
+        <div className="mt-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3.5">
+          <div className="flex items-start gap-2.5">
+            <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-[var(--color-text)]">
+                {tf("noEegFileTitle", "No EEG file?")}
+              </div>
+              <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-secondary)]">
+                {tf("noEegFileBody", "Don't have an EEG file? Don't worry — sample files are included. Download one?")}
+              </p>
+              <div className="mt-2.5">
+                <DownloadDataButton />
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* 游客模式：不登录直接进入，布局与登录态一致 */}
         <div className="mt-6 pt-5 border-t border-[var(--color-border)]">
           <button
             type="button"
             onClick={() => router.push("/")}
-            className="w-full py-2.5 px-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] text-sm font-medium text-[var(--color-text)] hover:border-[var(--color-text-secondary)] transition-colors"
+            className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] text-sm font-medium text-[var(--color-text)] hover:border-[var(--color-text-secondary)] transition-colors"
           >
             {tf("continueAsGuest", "Continue as guest")}
           </button>

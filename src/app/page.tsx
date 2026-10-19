@@ -44,8 +44,11 @@ export const metadata: Metadata = {
 
 /**
  * 首页是服务端组件：它只负责输出 metadata 并挂载客户端仪表盘。
- * 首屏 HTML 的正文来自 <DashboardClient /> 的服务端渲染结果（见该文件里 loading 分支的说明），
+ * 首屏 HTML 的正文来自 <DashboardClient /> 的服务端渲染结果，
  * 因此核心内容不依赖客户端 JavaScript 加载后才出现。
+ *
+ * 2026-10-15：游客落地区（GuestLanding）整页删除后，DashboardClient 里不再有
+ * loading 早返回分支 —— 游客与登录用户一样直接渲染分析工作台。
  */
 export default function HomePage() {
   return <DashboardClient />;

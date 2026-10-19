@@ -67,7 +67,7 @@ async function safeJsonFetch(url: string, timeoutMs: number, options: RequestIni
       throw new Error(`${tx("invalidJSON")}: ${text.slice(0, 300)}`);
     }
     if (!res.ok || data?.success === false) {
-      const msg = data?.error || data?.detail || `HTTP ${res.status}`;
+      const msg = data?.message || data?.error || data?.detail || `HTTP ${res.status}`;
       // 凭证过期 (HTTP 401) → 自动跳转登录页
       if (res.status === 401) {
         try {
@@ -134,7 +134,7 @@ function xhrAnalyze(
         if (typeof window !== "undefined") window.location.href = "/login";
       }
       if (xhr.status < 200 || xhr.status >= 300 || data?.success === false) {
-        reject(new Error(String(data?.error || data?.detail || `HTTP ${xhr.status}`)));
+        reject(new Error(String(data?.message || data?.error || data?.detail || `HTTP ${xhr.status}`)));
         return;
       }
       resolve(data);
@@ -229,18 +229,41 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     try { sessionStorage.setItem(getFilesCacheKey(), serializeFiles(files)); } catch {}
   }, [files]);
 
-  // Restore files from sessionStorage for this session (SPA navigation preservation)
-  useEffect(() => {
-    try {
-      const cached = sessionStorage.getItem(getFilesCacheKey());
-      if (cached) {
-        const restored = deserializeFiles(cached);
-        if (restored.length > 0) {
-          setFiles(restored);
+    // Restore files from sessionStorage for this session (SPA navigation preservation)
+    useEffect(() => {
+      try {
+        // ── 退出网站 = 退出登录（2026-10-18 用户要求）────────────────────
+        // 上次离开网站的时间戳若超过 30 秒宽限，就视为"退出登录"⇒ 清空上一次的分析状态，
+        // 下次进来是全新的游客（不会看到别人/上次留下的文件和结果）。
+        // 30 秒宽限用来区分「真关闭」和「普通刷新」：刷新时 pagehide 与本 effect 几乎同时发生，不会误清。
+        const lastHide = Number(sessionStorage.getItem("na-last-hide") || 0);
+        if (lastHide && Date.now() - lastHide > 30_000) {
+          sessionStorage.removeItem(getFilesCacheKey());
         }
-      }
-    } catch {}
-  }, []);
+        sessionStorage.removeItem("na-last-hide");
+
+        const cached = sessionStorage.getItem(getFilesCacheKey());
+        if (cached) {
+          const restored = deserializeFiles(cached);
+          if (restored.length > 0) {
+            setFiles(restored);
+          }
+        }
+      } catch {}
+    }, []);
+
+    // 离开/关闭网站时打时间戳（下一轮挂载据此判断是否需要清空）
+    useEffect(() => {
+      const onHide = () => {
+        try { sessionStorage.setItem("na-last-hide", String(Date.now())); } catch {}
+      };
+      window.addEventListener("pagehide", onHide);
+      window.addEventListener("beforeunload", onHide);
+      return () => {
+        window.removeEventListener("pagehide", onHide);
+        window.removeEventListener("beforeunload", onHide);
+      };
+    }, []);
 
   useEffect(() => {
     setFiles((prev) =>

@@ -132,6 +132,10 @@ export const viewport: Viewport = {
   ],
   width: "device-width",
   initialScale: 1,
+  // 2026-10-16 移动端适配：**必须加这条**，否则 body / main 上那些
+  // env(safe-area-inset-*) 在刘海屏上一律为 0，等于白写。
+  // 加了之后内容才会避让刘海与底部 Home Indicator。
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
@@ -175,10 +179,18 @@ export default async function RootLayout({
           // 用户显式选过 light/dark/system 则完全尊重其选择，不做任何覆盖。
           __html: `(function(){try{var t=localStorage.getItem("theme");var dark=t?(t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches)):true;if(dark)document.documentElement.classList.add("dark")}catch(e){}})()`
         }} />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
-        />
+          <script
+            dangerouslySetInnerHTML={{
+              // 2026-10-18：游客「退出网站 = 退出登录」⇒ 下次进来必须重新勾选
+              // 免责声明 / 隐私政策 / 服务条款。这里在 React 挂载**之前**跑，
+              // 清掉同意标记（na-last-hide 由 analysis-context 自己消费，这里不删）。
+              __html: `(function(){try{var h=Number(sessionStorage.getItem("na-last-hide")||0);if(h&&Date.now()-h>30000){localStorage.removeItem("neuroaccess-disclaimer-accepted");sessionStorage.removeItem("na-guest-consent");}}catch(e){}})()`,
+            }}
+          />
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+          />
         <link rel="shortcut icon" href="/favicon.ico?v=4" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=4" />
@@ -195,7 +207,7 @@ export default async function RootLayout({
               <PostLoginModals />
               <NotificationToast />
               <RoutePrefetcher />
-              <div className="flex h-screen overflow-hidden">
+              <div className="flex app-shell overflow-hidden">
                 <Sidebar />
                 <div className="flex-1 flex flex-col overflow-hidden">
                   <TopNav />

@@ -18,7 +18,7 @@ import time as _time
 from typing import Any, Optional, List, Dict
 
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, Form, Request, Depends
+from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from utils import safe_float, to_jsonable, safe_name, normalize_language
@@ -289,6 +289,104 @@ def _fw_cleanup(now: float):
     stale = [k for k, dq in _FW_HITS.items() if not dq or now - dq[-1] > 3600]
     for k in stale:
         del _FW_HITS[k]
+
+
+# ── 游客分析配额（2026-10-18）─────────────────────────────────────────
+# 需求：游客最多分析 3 次。按客户端 IP 计数，落盘到 JSON（PM2 重启不清零）。
+# 登录用户不受此限。计数点：/api/analyze（上传文件分析）与 /api/try-sample（示例分析）。
+GUEST_ANALYSIS_LIMIT = 3
+_GUEST_QUOTA_PATH = os.path.join(BASE_DIR, "guest_quota.json")
+_guest_quota_cache: Optional[Dict[str, int]] = None
+_QUOTA_COUNTED_RIDS: set = set()   # 已计过费的 report_id（幂等去重）
+
+
+def _guest_quota_load() -> Dict[str, int]:
+    global _guest_quota_cache
+    if _guest_quota_cache is None:
+        try:
+            with open(_GUEST_QUOTA_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            _guest_quota_cache = data if isinstance(data, dict) else {}
+        except Exception:
+            _guest_quota_cache = {}
+    return _guest_quota_cache
+
+
+def _guest_cookie_id(request: Request) -> str:
+    """读取设备标识 cookie（na_guest_id）。没有返回空串。"""
+    try:
+        v = request.cookies.get("na_guest_id") or ""
+        return v.strip()[:64]
+    except Exception:
+        return ""
+
+
+def _guest_quota_used(ip: str) -> int:
+    try:
+        return int(_guest_quota_load().get(ip, 0))
+    except Exception:
+        return 0
+
+
+def _guest_quota_used_any(gid: str, ip: str) -> int:
+    """配额 = IP 与设备 cookie 两条线里**用得更多的那条**。
+
+    2026-10-18：用户要求「防止三次用完后退出、重新以游客形式登录又刷新三次」。
+    - 只用 IP：换网络（VPN/移动数据）就能重置。
+    - 只用 cookie：退出不影响，但无痕窗口会重置。
+    - 两条一起取 max：退出/重登不重置（cookie 还在、IP 没变），换 IP 也刷不掉（cookie 记得），
+      无痕也刷不掉（IP 记得）。只有「换网络 + 清 cookie」同时做才能绕过，成本已经足够高。
+    """
+    q = _guest_quota_load()
+    by_ip = max(int(q.get("ip:" + ip, 0) or 0), int(q.get(ip, 0) or 0))  # 兼容旧格式（裸 IP 键）
+    by_id = int(q.get("gid:" + gid, 0) or 0) if gid else 0
+    return max(by_ip, by_id)
+
+
+def _guest_quota_add(ip: str, gid: str = "", rid: str = "") -> int:
+    """记一次游客用量。**按 report_id 幂等**：同一次分析无论请求发几遍只计一次。
+
+    2026-10-18：用户报「只分析了一次，刷新后显示三次都用完了」。
+    ⇒ 前端在某些情况下会把同一个 report_id 的 `/api/analyze` 发多次（重试/重复触发），
+    原来的实现每收到一次请求就 +1，于是**一次上传被记成 3 次**。
+    """
+    global _guest_quota_cache
+    if rid:
+        if rid in _QUOTA_COUNTED_RIDS:
+            return _guest_quota_used_any(gid, ip)
+        _QUOTA_COUNTED_RIDS.add(rid)
+        if len(_QUOTA_COUNTED_RIDS) > 5000:
+            _QUOTA_COUNTED_RIDS.clear()
+    q = _guest_quota_load()
+    by_ip = max(int(q.get("ip:" + ip, 0) or 0), int(q.get(ip, 0) or 0)) + 1
+    q["ip:" + ip] = by_ip
+    q.pop(ip, None)  # 清掉旧格式键，避免重复计数
+    if gid:
+        q["gid:" + gid] = max(int(q.get("gid:" + gid, 0) or 0), by_ip - 1) + 1
+    print(f"[GUEST-QUOTA] +1 ip={ip} gid={gid[:8]} rid={rid or '-'} => used={by_ip}", flush=True)
+    try:
+        tmp = _GUEST_QUOTA_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(q, f)
+        os.replace(tmp, _GUEST_QUOTA_PATH)
+    except Exception as e:
+        print(f"[GUEST-QUOTA] save failed: {e}", flush=True)
+    return by_ip
+
+
+def _guest_quota_block(ip: str, gid: str = "") -> Optional[Dict[str, Any]]:
+    """已用满则返回给前端的错误体；否则 None。"""
+    used = _guest_quota_used_any(gid, ip)
+    if used >= GUEST_ANALYSIS_LIMIT:
+        return {
+            "success": False,
+            "error": "guest_quota_exhausted",
+            "message": f"游客模式最多可分析 {GUEST_ANALYSIS_LIMIT} 个文件，已用完。注册后不限次数。",
+            "limit": GUEST_ANALYSIS_LIMIT,
+            "used": used,
+        }
+    return None
+
 
 @app.middleware("http")
 async def security_firewall(request: Request, call_next):
@@ -607,7 +705,69 @@ def optional_user_id(request: Request):
         return None
 
 
-def _downsample_waveform_preview(wp, target_pts=800, pts_per_sec=120, byte_budget=1500000):
+# =====================================================================
+# 游客波形稠密缓存（进程内存 LRU + TTL）
+# ---------------------------------------------------------------------
+# 背景：游客分析不落库（_report_payload=None），/api/waveform-data 按报告 ID 查
+#       DB 必然 miss ⇒ 前端只能拿响应里那份降采样波形（大文件 ~43 点/秒）自绘，
+#       观感比登录报告页（DB 稠密 ~160 点/秒）差一截 —— 用户实测判定「不像」。
+# 做法：分析完成时把**稠密** waveform_preview 存进程内存（存 JSON 串，
+#       比 Python 浮点列表省 3~4 倍内存）；/api/waveform-data 对
+#       "guest-<analysis_id>" 前缀（前端 GuestResultView 既有命名）查这份缓存。
+# 上限：总字节预算 _GUEST_WAVE_MAX_BYTES，超出删最旧；单条 TTL 30 分钟。
+#       重启后缓存清空 ⇒ 前端自动回退本地稀疏渲染（与旧行为一致，优雅降级）。
+# =====================================================================
+_GUEST_WAVE_CACHE: Dict[str, str] = {}
+_GUEST_WAVE_ORDER: list = []
+_GUEST_WAVE_STAMPS: Dict[str, float] = {}
+_GUEST_WAVE_LOCK = threading.Lock()
+_GUEST_WAVE_MAX_BYTES = 48 * 1024 * 1024   # 最坏 63ch/123s ≈ 9MB/份，预算内可放 ~5 份
+_GUEST_WAVE_TTL = 1800.0                   # 30 分钟
+
+
+def _cache_guest_wave(aid: str, wp) -> None:
+    """游客分析完成后缓存稠密波形（只存内存，不落盘）。"""
+    if not aid or not isinstance(wp, dict) or not (wp.get("channels") or {}):
+        return
+    try:
+        blob = json.dumps(wp, separators=(",", ":"), ensure_ascii=False)
+    except Exception:
+        return
+    if len(blob) > _GUEST_WAVE_MAX_BYTES:
+        return
+    with _GUEST_WAVE_LOCK:
+        if aid not in _GUEST_WAVE_CACHE:
+            _GUEST_WAVE_ORDER.append(aid)
+        _GUEST_WAVE_CACHE[aid] = blob
+        _GUEST_WAVE_STAMPS[aid] = _time.time()
+        total = sum(len(v) for v in _GUEST_WAVE_CACHE.values())
+        while len(_GUEST_WAVE_ORDER) > 1 and total > _GUEST_WAVE_MAX_BYTES:
+            old = _GUEST_WAVE_ORDER.pop(0)
+            total -= len(_GUEST_WAVE_CACHE.pop(old, "") or "")
+            _GUEST_WAVE_STAMPS.pop(old, None)
+
+
+def _get_guest_wave(aid: str):
+    """取游客稠密波形；过期/不存在返回 None。"""
+    if not aid:
+        return None
+    with _GUEST_WAVE_LOCK:
+        blob = _GUEST_WAVE_CACHE.get(aid)
+        if blob is None:
+            return None
+        if _time.time() - _GUEST_WAVE_STAMPS.get(aid, 0.0) > _GUEST_WAVE_TTL:
+            if aid in _GUEST_WAVE_ORDER:
+                _GUEST_WAVE_ORDER.remove(aid)
+            _GUEST_WAVE_CACHE.pop(aid, None)
+            _GUEST_WAVE_STAMPS.pop(aid, None)
+            return None
+    try:
+        return json.loads(blob)
+    except Exception:
+        return None
+
+
+def _downsample_waveform_preview(wp, target_pts=800, pts_per_sec=120, byte_budget=3000000):
     """Downsample waveform_preview time series to shrink /api/analyze JSON.
 
     `target_pts` is a FLOOR, not a cap. A fixed 800-point cap is duration-blind and
@@ -617,6 +777,12 @@ def _downsample_waveform_preview(wp, target_pts=800, pts_per_sec=120, byte_budge
     Scale the budget with duration instead (~120 pts/s matches the client's 1200
     vertices/page ceiling), bounded by a JSON byte budget (~9 B per sample as
     serialized) so the payload stays in the same ballpark as the old worst case.
+
+    2026-10-19: byte_budget 1.5MB → 3MB. 实测 64ch/125s 真实文件在 1.5MB 下只分到
+    ~2600 点（21 点/秒），渲染出的波形缺高频细节、观感稀疏（用户判「假」，与
+    8ch 测试文件的 120 点/秒差距悬殊）。3MB 后同文件 ~5200 点（42 点/秒），
+    α 节律（8-13Hz）完整保留。客户端 localStorage 有自己的预算裁剪
+    （reports-storage.ts，MAX_WP_PTS=4000/通道），不会因此爆仓。
 
     Values are also rounded to 3 decimals: the raw float64 output of analysis.py
     serialises as 19-char numbers ("-123.45678901234567"), which tripled the payload
@@ -653,8 +819,39 @@ def _downsample_waveform_preview(wp, target_pts=800, pts_per_sec=120, byte_budge
     return out
 
 
+@app.get("/api/guest-quota")
+def guest_quota(request: Request, response: Response):
+    """游客分析配额状态（0..limit）。带 Bearer token 视为登录用户 ⇒ unlimited。
+
+    ⚠️ 这里**不能**用 `Depends(security)` —— `security` 在文件更靠后的鉴权段才定义，
+    放在本函数的签名里会在模块导入阶段就 NameError，导致整个后端起不来（2026-10-18 踩过）。
+
+    同时负责**下发设备标识 cookie**（na_guest_id）：配额按「IP」和「设备 cookie」两条线取 max，
+    这样退出重登、无痕窗口、单换 IP 都刷不掉次数（见 _guest_quota_used_any）。
+    """
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer ") and len(auth) > 10:
+        return {"success": True, "guest": False, "unlimited": True,
+                "limit": GUEST_ANALYSIS_LIMIT, "used": 0, "remaining": GUEST_ANALYSIS_LIMIT}
+
+    ip = _fw_client_ip(request)
+    gid = _guest_cookie_id(request)
+    if not gid:
+        import uuid as _uuid
+        gid = _uuid.uuid4().hex
+        try:
+            response.set_cookie("na_guest_id", gid, max_age=86400 * 365,
+                                httponly=True, samesite="lax", secure=True, path="/")
+        except Exception:
+            pass
+    used = _guest_quota_used_any(gid, ip)
+    return {"success": True, "guest": True, "unlimited": False,
+            "limit": GUEST_ANALYSIS_LIMIT, "used": used,
+            "remaining": max(0, GUEST_ANALYSIS_LIMIT - used)}
+
+
 @app.post("/api/analyze")
-async def analyze(file: UploadFile = File(...), language: str = Form("zh"), report_id: str = Form(None), progress_id: str = Form(None), current_user_id: Optional[int] = Depends(optional_user_id)):
+async def analyze(request: Request, file: UploadFile = File(...), language: str = Form("zh"), report_id: str = Form(None), progress_id: str = Form(None), current_user_id: Optional[int] = Depends(optional_user_id)):
     """
     快速分析 EDF 文件（v2.0）
     - 不调用 Ollama AI
@@ -673,6 +870,16 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
 
     # 进度上报用的 key：优先 progress_id，其次 report_id（前端两者通常相同）
     pid = progress_id or report_id
+
+    # ── 游客配额：最多 3 次（登录用户不限）─────────────────────
+    # 2026-10-18 用户要求。按 IP 计数、落盘持久化；失败的分析不消耗配额（见下方只在成功时 _add）。
+    _guest_ip = _fw_client_ip(request)
+    _guest_gid = _guest_cookie_id(request)
+    if current_user_id is None:
+        _blk = _guest_quota_block(_guest_ip, _guest_gid)
+        if _blk:
+            _set_progress(pid, "error", error=_blk["message"])
+            return _blk
 
     # ── 保存文件 ─────────────────────────────────────────────────
     lang = normalize_language(language)
@@ -728,6 +935,10 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
         # ── 生成 analysis_id（供 /explain 轮询）──────────────────
         analysis_id = hashlib.md5((file_path + str(_time.time())).encode()).hexdigest()[:12]
         _cache_explanations(analysis_id, {"explanations": None, "ready": False})
+        # 游客（无账户）不落库 ⇒ 把稠密波形存内存缓存，供 /api/waveform-data 按页取；
+        # 登录用户报告（含稠密波形）在下方存 DB，走 DB 查询即可，不必进缓存。
+        if current_user_id is None:
+            _cache_guest_wave(analysis_id, enhanced.get("waveform_preview"))
         # 让前端能顺带拿到 analysis_id（用于 AI 解释轮询），同时把阶段推进到"报告已生成"
         _set_progress(pid, "report", analysis_id=analysis_id)
         
@@ -793,6 +1004,9 @@ async def analyze(file: UploadFile = File(...), language: str = Form("zh"), repo
         # 响应只回传降采样后的波形预览（~800 点/通道），大幅减小 JSON 体积
         resp_analysis = dict(analysis_out)
         resp_analysis["waveform_preview"] = _downsample_waveform_preview(analysis_out.get("waveform_preview"), 800)
+        # 分析成功才消耗一次游客配额（失败/报错不计）
+        if current_user_id is None:
+            _guest_quota_add(_guest_ip, _guest_gid, str(pid or ""))
         return {"success": True, "file_name": file_name, "analysis": resp_analysis,
                 "guest": not bool(current_user_id)}
         
@@ -921,6 +1135,9 @@ async def try_sample(request: Request):
         }
         analysis_id = hashlib.md5((path + str(_time.time())).encode()).hexdigest()[:12]
         _cache_explanations(analysis_id, {"explanations": None, "ready": False})
+        # 游客报告不落库 ⇒ 把稠密波形存内存缓存，供 /api/waveform-data 按页取
+        # （前端 rid = "guest-<analysis_id>"；没有这步游客只能渲染降采样波形）
+        _cache_guest_wave(analysis_id, enhanced.get("waveform_preview"))
         _set_progress(pid, "report", analysis_id=analysis_id)
 
         analysis_out = {
@@ -1066,6 +1283,61 @@ def _cases_payload():
 def api_cases():
     """案例库数据集清单（无需登录）。只返回事实性元数据。"""
     return {"success": True, "cases": _cases_payload()}
+
+
+_CASE_WAVE_CACHE: Dict[str, Any] = {}
+
+@app.get("/api/cases/waveform")
+def cases_waveform(case_id: str = "", page: int = 0):
+    """案例对应的**原始波形数据**（JSON），供前端用 buildWaveformSvg 自绘。
+
+    2026-10-18：用户指出「案例库只看得到分析、看不到原始数据，看不到原始数据
+    分析就没有意义」。这里把案例片段**原样**吐给前端，让用户能对着波形核对频段结论。
+    纯本地计算（读 EDF + 抽点），**不调用任何 AI、不消耗 token**；首次请求后按案例缓存。
+    """
+    meta = CASE_REGISTRY.get(case_id)
+    if not meta:
+        return {"success": False, "error": f"Unknown case: {case_id}"}
+    wp = _CASE_WAVE_CACHE.get(case_id)
+    if wp is None:
+        try:
+            from analysis import fast_preview_window
+            path = os.path.join(CASES_DIR, meta["file"])
+            if not os.path.exists(path):
+                return {"success": False, "error": "Case file missing on server"}
+            wp = fast_preview_window(path, duration_sec=float(meta.get("duration_sec") or 55.0))
+            _CASE_WAVE_CACHE[case_id] = wp
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    chs = wp.get("channels") or {}
+    times = wp.get("times") or []
+    names = list(chs.keys())
+    if not names or len(times) < 2:
+        return {"success": False, "error": "No waveform data"}
+
+    t0_all = float(times[0])
+    dur_all = max(float(times[-1]) - t0_all, 1e-9)
+    if dur_all > 30 and page >= 0:
+        total_pages = max(1, int(math.ceil(dur_all / 10.0)))
+        page = max(0, min(int(page), total_pages - 1))
+        w0 = t0_all + page * 10.0
+        w1 = min(t0_all + dur_all, w0 + 10.0)
+        from bisect import bisect_left
+        i0 = bisect_left(times, w0)
+        i1 = min(len(times), bisect_left(times, w1) + 1)
+    else:
+        i0, i1 = 0, len(times)
+
+    return {
+        "success": True,
+        "times": [float(t) for t in times[i0:i1]],
+        "channels": {c: [float(v) for v in chs[c][i0:i1]] for c in names},
+        "channelNames": names,
+        "samplingRate": wp.get("sampling_rate"),
+        "durationSec": float(meta.get("duration_sec") or 0),
+        "totalPages": max(1, int(math.ceil(dur_all / 10.0))) if dur_all > 30 else 1,
+    }
 
 
 @app.post("/api/cases/analyze")
@@ -1541,7 +1813,7 @@ def verify_turnstile(token: str) -> bool:
 @app.post("/api/auth/register")
 def auth_register(username: str = Form(...), email: str = Form(...),
                   password: str = Form(...), code: str = Form(...),
-                  cf_turnstile_response: str = Form(""), invite_code: str = Form("")):
+                  cf_turnstile_response: str = Form("")):
     if not AUTH_AVAILABLE:
         return {"success": False, "error": f"认证模块不可用: {AUTH_IMPORT_ERROR}"}
     # 先人机验证（不消耗验证码），再校验验证码，避免验证码被提前消耗导致人机验证重试失败
@@ -1551,49 +1823,15 @@ def auth_register(username: str = Form(...), email: str = Form(...),
         return {"success": False, "error": "验证码无效或已过期"}
     try:
         user = create_user(username, email, password)
-        # 学校邀请码：注册时填写则自动加入对应学校
-        org_id = None
-        if invite_code:
-            conn = _get_org_conn()
-            row = conn.execute("SELECT id, name FROM organizations WHERE invite_code = ?", (invite_code.strip(),)).fetchone()
-            conn.close()
-            if row:
-                org_id = row["id"]
-                conn = _get_org_conn()
-                conn.execute("UPDATE users SET org_id = ? WHERE id = ?", (org_id, user["id"]))
-                conn.commit()
-                conn.close()
-            else:
-                # 邀请码无效不阻断注册，仅提示
-                pass
+        # 2026-10-18：移除「学校邀请码」功能（用户未要求过，当时是我自行加的；学校合作早已终止）。
+        # 这里原本会在注册时按 invite_code 把用户挂到 organizations 表，现已不需要。
         token = create_access_token({"sub": str(user["id"]), "username": user["username"]})
         return {"success": True, "token": token, "user": {"id": user["id"], "username": user["username"],
                 "email": user["email"], "phone": user.get("phone", ""),
-                "avatar_url": user.get("avatar_url", ""), "avatar_color": user.get("avatar_color", "blue"),
-                "org_id": org_id}}
+                "avatar_url": user.get("avatar_url", ""), "avatar_color": user.get("avatar_color", "blue")}}
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-@app.post("/api/orgs/register")
-def org_register(org_name: str = Form(...), contact_name: str = Form(""), contact_email: str = Form("")):
-    """学校/机构自助入驻：创建一个机构并生成邀请码（公开接口）"""
-    import secrets as _sec
-    name = org_name.strip()[:120]
-    if not name:
-        return {"success": False, "error": "请填写学校/机构名称"}
-    code = "NA-" + _sec.token_hex(3).upper()
-    try:
-        conn = _get_org_conn()
-        cur = conn.execute(
-            "INSERT INTO organizations (name, contact_name, contact_email, invite_code) VALUES (?,?,?,?)",
-            (name, contact_name.strip()[:80], contact_email.strip()[:120], code),
-        )
-        conn.commit()
-        org_id = cur.lastrowid
-        conn.close()
-        return {"success": True, "org_id": org_id, "invite_code": code, "name": name}
-    except Exception as e:
-        return {"success": False, "error": f"入驻失败: {e}"}
 
 
 @app.get("/api/orgs/my")
@@ -2589,16 +2827,82 @@ except Exception as _sim_e:
 # =================================================================
 # 波形图像端点：返回纯 SVG，前端用 <img> 直接加载，绕过 React canvas
 # =================================================================
+@app.get("/api/waveform-data")
+def waveform_data(rid: str = "", page: int = 0, ch0: int = 0, nch: int = 0):
+    """返回指定窗口的**原始波形数据**（JSON），供前端 buildWaveformSvg 自绘。
+
+    2026-10-18：用户要求「报告里的图要和我发来的样例完全一样的渲染效果」。
+    系统里有两套渲染器（前端 buildWaveformSvg / 后端 gen_waveform_svg），长得不一样。
+    这里把 DB 里的原始波形按窗口吐给前端，让它用**同一套前端渲染器**画 ——
+    效果与自造样例逐像素一致。数据仍是分析时按全采样率落库的那份。
+    """
+    if not rid:
+        return {"success": False, "error": "Missing report ID"}
+    try:
+        # 2026-10-19：游客报告不落库，前端 rid = "guest-<analysis_id>"（GuestResultView
+        # 既有命名）⇒ 查进程内稠密缓存；miss 时返回失败，前端自动回退本地稀疏渲染。
+        # 登录用户 rid = 真实报告 ID，走 DB（原有路径不变）。
+        if rid.startswith("guest-"):
+            gw = _get_guest_wave(rid[len("guest-"):])
+            if gw is None:
+                return {"success": False, "error": "Report not found"}
+            d = {"analysis": {"waveform_preview": gw}}
+        else:
+            from auth import get_db
+            conn = get_db()
+            row = conn.execute("SELECT data FROM reports WHERE id=?", (rid,)).fetchone()
+            conn.close()
+            if not row:
+                return {"success": False, "error": "Report not found"}
+            d = json.loads(row[0])
+        wp = (d.get("analysis") or {}).get("waveform_preview") or {}
+        chs = wp.get("channels") or {}
+        times = wp.get("times") or []
+        names = list(chs.keys())
+        if not names or len(times) < 2:
+            return {"success": False, "error": "No waveform data"}
+
+        c0 = max(0, min(int(ch0 or 0), len(names) - 1))
+        want_n = int(nch or 0) or len(names)
+        sel = names[c0:c0 + want_n] or names
+
+        t0_all = float(times[0])
+        dur_all = max(float(times[-1]) - t0_all, 1e-9)
+        if dur_all > 30 and page >= 0:
+            total_pages = max(1, int(math.ceil(dur_all / 10.0)))
+            page = max(0, min(int(page), total_pages - 1))
+            w0 = t0_all + page * 10.0
+            w1 = min(t0_all + dur_all, w0 + 10.0)
+            from bisect import bisect_left
+            i0 = bisect_left(times, w0)
+            i1 = min(len(times), bisect_left(times, w1) + 1)
+        else:
+            i0, i1 = 0, len(times)
+
+        return {
+            "success": True,
+            "times": [float(t) for t in times[i0:i1]],
+            "channels": {c: [float(v) for v in chs[c][i0:i1]] for c in sel},
+            "channelNames": sel,
+            "totalChannels": len(names),
+            "samplingRate": wp.get("sampling_rate"),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/api/waveform-image")
-def waveform_image(rid: str = "", page: int = 0):
-    """根据报告ID返回波形SVG图像（page: 0-based 页号，每屏 10 秒，-1/缺省=整段兼容）"""
-    svg = gen_waveform_svg(rid, page=page)
+def waveform_image(rid: str = "", page: int = 0, ch0: int = 0, nch: int = 0):
+    """根据报告ID返回波形SVG图像
+    page: 0-based 页号，每屏 10 秒
+    ch0/nch: 通道起止（2026-10-18 新增，按通道分页看细节；nch=0 表示全部）"""
+    svg = gen_waveform_svg(rid, page=page, ch0=ch0, nch=nch)
     from fastapi.responses import Response
     return Response(content=svg, media_type="image/svg+xml",
                     headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
-def gen_waveform_svg(rid: str, page: int = -1) -> str:
+def gen_waveform_svg(rid: str, page: int = -1, ch0: int = 0, nch: int = 0) -> str:
     """从数据库读取报告数据，生成纯SVG波形图（每通道一条原始波形曲线，统一颜色）"""
     def esc(s):
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace('"',"&quot;")
@@ -2619,7 +2923,13 @@ def gen_waveform_svg(rid: str, page: int = -1) -> str:
         if not chs:
             return f"<svg width=400 height=100><text y=50 fill=#888>No waveform data</text></svg>"
 
-        ch_names = list(chs.keys())
+        ch_names_all = list(chs.keys())
+        _total_ch = len(ch_names_all)
+        # 2026-10-18 通道分页：63 通道塞进一屏只有 10px/通道，波形会糊成实心带子（用户判定「假」）。
+        # 允许按 ch0/nch 只渲染一段通道，行高就能回到 20px 上下、看得出波形。
+        _want_n = nch if (nch and nch > 0) else _total_ch
+        _c0 = max(0, min(int(ch0 or 0), max(0, _total_ch - 1)))
+        ch_names = ch_names_all[_c0:_c0 + _want_n] or ch_names_all
         nch = len(ch_names)
         npts = len(chs[ch_names[0]]) if nch else 0
         if npts < 2:
@@ -2685,18 +2995,22 @@ def gen_waveform_svg(rid: str, page: int = -1) -> str:
             vals = chs[ch]
             if len(vals) < 2: continue
             sc = (laneH * 0.45) / gp95  # 全局统一比例，保留各通道真实振幅差异
-            cl = gp95
+            # 2026-10-18：**不再钳位到 ±gp95**。原来 max(-cl, min(cl, v)) 会把所有尖峰削成平顶、
+            # 每行都填满 ⇒ 看起来像人造波形（用户判定「很假」）；客户端渲染器不钳位、按真实幅度
+            # 自由伸展，观感更接近 EDFbrowser。这里与客户端统一。
             if len(times) == len(vals):
-                pts = "M" + "".join(f" {LW + (float(times[j])-t0)/dur*PLOT_W:.1f},{y - max(-cl, min(cl, vals[j]))*sc:.2f}" for j in range(len(vals)))
+                pts = "M" + "".join(f" {LW + (float(times[j])-t0)/dur*PLOT_W:.1f},{y - vals[j]*sc:.2f}" for j in range(len(vals)))
             else:
-                pts = "M" + "".join(f" {LW + j/(npts-1)*PLOT_W:.1f},{y - max(-cl, min(cl, vals[j]))*sc:.2f}" for j in range(len(vals)))
+                pts = "M" + "".join(f" {LW + j/(npts-1)*PLOT_W:.1f},{y - vals[j]*sc:.2f}" for j in range(len(vals)))
             svg.append(f'<path d="{pts}" stroke="{LINE_COLOR}" stroke-width="0.8" fill="none" opacity="0.9"/>')
 
         # 时间刻度：按真实时间分布（0, dur/5, …, dur）
+        # 2026-10-18：标注**文件绝对时间**（t0 + t）。原来只写窗口内相对时间，
+        # 分页到第 2 页时坐标轴又从 0s 开始，与实际 10~20s 的内容对不上。
         for i in range(6):
             t = i * dur / 5
             x = LW + (i / 5) * PLOT_W
-            svg.append(f'<text x="{x:.1f}" y="{H-4}" fill="#667" font-size="9" text-anchor="middle">{t:.1f}s</text>')
+            svg.append(f'<text x="{x:.1f}" y="{H-4}" fill="#667" font-size="9" text-anchor="middle">{t0 + t:.1f}s</text>')
         svg.append("</svg>")
         return "".join(svg)
     except Exception as e:

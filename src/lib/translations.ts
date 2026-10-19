@@ -3,7 +3,6 @@ export type Lang = "zh" | "en" | "es" | "fr" | "de" | "ja" | "ko";
 
 export const translations: Record<Lang, Record<string, string>> = {
   zh: {
-    howItWorks: "工作原理",
     "downloadData": "下载 EEG 数据",
     "downloadDataDesc": "选择适合你的学习包开始下载",
     "packBeginner": "入门学习",
@@ -486,8 +485,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "最后更新：2026年10月3日",
     allRightsReserved: "保留所有权利。",
     termsOfService: "服务条款",
-    inviteCode: "学校邀请码（选填）",
-    inviteCodePlaceholder: "例如 NA-8F2C1A",
     backToHome: "返回首页",
     mobileNotOptimized: "本网站暂未对移动端进行优化，建议在桌面端获得最佳体验。",
     about: "关于 NeuroAccess",
@@ -904,6 +901,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     stateSeizure: "癫痫发作（模拟）",
     correctAnswer: "正确答案是",
     login: "登录",
+    noEegFileTitle: "没有 EEG 文件？",
+    noEegFileBody: "普通人没有 EEG 文件怎么办？不用慌，网站给你配备了测试文件，是否去下载？",
     networkErrorMsg: "网络错误",
     failedToChangePasswordMsg: "密码修改失败",
     surveyOther: '其他',
@@ -939,7 +938,6 @@ export const translations: Record<Lang, Record<string, string>> = {
   // English (en)
   // ─────────────────────────────────────────────
   en: {
-    howItWorks: "How It Works",
     "downloadData": "Download EEG Data",
     "downloadDataDesc": "Choose a learning pack to download",
     "packBeginner": "Beginner",
@@ -1412,8 +1410,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "Last updated: October 3, 2026",
     allRightsReserved: "All rights reserved.",
     termsOfService: "Terms of Service",
-    inviteCode: "School invite code (optional)",
-    inviteCodePlaceholder: "e.g. NA-8F2C1A",
     backToHome: "Back to Home",
     mobileNotOptimized: "This website is not optimized for mobile devices. For the best experience, please use a desktop browser.",
     about: "About NeuroAccess",
@@ -1846,6 +1842,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     viewInReports: "View report →",
     yes: "Yes",
     login: "Login",
+    noEegFileTitle: "No EEG file?",
+    noEegFileBody: "Don't have an EEG file? Don't worry — sample files are included. Download one?",
     networkErrorMsg: "Network error",
     failedToChangePasswordMsg: "Failed to change password",
     surveyOther: 'Other',
@@ -1881,7 +1879,6 @@ export const translations: Record<Lang, Record<string, string>> = {
   // Spanish (es)
   // ─────────────────────────────────────────────
   es: {
-    howItWorks: "Cómo funciona",
     "downloadData": "Descargar datos EEG",
     "downloadDataDesc": "Elige un paquete de aprendizaje para descargar",
     "packBeginner": "Principiante",
@@ -2331,8 +2328,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "Última actualización: 3 de octubre de 2026",
     allRightsReserved: "Todos los derechos reservados.",
     termsOfService: "Términos de Servicio",
-    inviteCode: "Código de invitación (opcional)",
-    inviteCodePlaceholder: "p. ej. NA-8F2C1A",
     backToHome: "Volver al Inicio",
     mobileNotOptimized: "Este sitio web no está optimizado para dispositivos móviles. Para la mejor experiencia, use un navegador de escritorio.",
     about: "Acerca de NeuroAccess",
@@ -2765,6 +2760,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     viewInReports: "Ver informe →",
     yes: "Sí",
     login: "Iniciar sesión",
+    noEegFileTitle: "¿No tienes un archivo EEG?",
+    noEegFileBody: "¿No tienes un archivo EEG? No te preocupes: hemos incluido archivos de ejemplo. ¿Quieres descargar uno?",
     networkErrorMsg: "Error de red",
     failedToChangePasswordMsg: "Error al cambiar la contraseña",
     surveyOther: 'Otro',
@@ -2800,7 +2797,6 @@ export const translations: Record<Lang, Record<string, string>> = {
   // French (fr)
   // ─────────────────────────────────────────────
   fr: {
-    howItWorks: "Fonctionnement",
     "downloadData": "Télécharger les données EEG",
     "downloadDataDesc": "Choisissez un pack d'apprentissage à télécharger",
     "packBeginner": "Débutant",
@@ -3250,8 +3246,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "Dernière mise à jour : 3 octobre 2026",
     allRightsReserved: "Tous droits réservés.",
     termsOfService: "Conditions d'Utilisation",
-    inviteCode: "Code d'invitation (optionnel)",
-    inviteCodePlaceholder: "p. ex. NA-8F2C1A",
     backToHome: "Retour à l'Accueil",
     mobileNotOptimized: "Ce site n'est pas optimisé pour les appareils mobiles. Pour une meilleure expérience, veuillez utiliser un navigateur de bureau.",
     about: "À Propos de NeuroAccess",
@@ -3684,6 +3678,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     viewInReports: "Voir le rapport →",
     yes: "Oui",
     login: "Connexion",
+    noEegFileTitle: "Pas de fichier EEG ?",
+    noEegFileBody: "Pas de fichier EEG ? Pas d'inquiétude : des fichiers d'exemple sont fournis. En télécharger un ?",
     networkErrorMsg: "Erreur réseau",
     failedToChangePasswordMsg: "Échec du changement de mot de passe",
     surveyOther: 'Autre',
@@ -3719,7 +3715,6 @@ export const translations: Record<Lang, Record<string, string>> = {
   // German (de)
   // ─────────────────────────────────────────────
   de: {
-    howItWorks: "Funktionsweise",
     "downloadData": "EEG-Daten herunterladen",
     "downloadDataDesc": "Wähle ein Lernpaket zum Herunterladen",
     "packBeginner": "Anfänger",
@@ -4169,8 +4164,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "Letzte Aktualisierung: 3. Oktober 2026",
     allRightsReserved: "Alle Rechte vorbehalten.",
     termsOfService: "Nutzungsbedingungen",
-    inviteCode: "Einladungscode (optional)",
-    inviteCodePlaceholder: "z. B. NA-8F2C1A",
     backToHome: "Zurück zur Startseite",
     mobileNotOptimized: "Diese Webseite ist nicht für mobile Geräte optimiert. Für das beste Erlebnis bitten wir um die Nutzung eines Desktop-Browsers.",
     about: "Über NeuroAccess",
@@ -4603,6 +4596,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     viewInReports: "Bericht anzeigen →",
     yes: "Ja",
     login: "Anmelden",
+    noEegFileTitle: "Keine EEG-Datei?",
+    noEegFileBody: "Keine EEG-Datei? Keine Sorge – Beispieldateien sind enthalten. Eine herunterladen?",
     networkErrorMsg: "Netzwerkfehler",
     failedToChangePasswordMsg: "Fehler beim Ändern des Passworts",
     surveyOther: 'Sonstiges',
@@ -4638,7 +4633,6 @@ export const translations: Record<Lang, Record<string, string>> = {
   // Japanese (ja)
   // ─────────────────────────────────────────────
   ja: {
-    howItWorks: "仕組み",
     "downloadData": "EEG データをダウンロード",
     "downloadDataDesc": "ダウンロードする学習パッケージを選択",
     "packBeginner": "入門",
@@ -5088,8 +5082,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "最終更新：2026年10月3日",
     allRightsReserved: "全著作権予約。",
     termsOfService: "利用規約",
-    inviteCode: "学校の招待コード（任意）",
-    inviteCodePlaceholder: "例: NA-8F2C1A",
     backToHome: "ホームに戻る",
     mobileNotOptimized: "このウェブサイトはモバイル端末に最適化されていません。最佳の体验を得るために、デスクトップブラウザの使用をお勧めします。",
     about: "NeuroAccessについて",
@@ -5522,6 +5514,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     viewInReports: "レポートを表示 →",
     yes: "はい",
     login: "ログイン",
+    noEegFileTitle: "EEG ファイルがない？",
+    noEegFileBody: "EEG ファイルがなくても大丈夫。サンプルファイルを用意しています。ダウンロードしますか？",
     networkErrorMsg: "ネットワークエラー",
     failedToChangePasswordMsg: "パスワード変更失敗",
     surveyOther: 'その他',
@@ -5557,7 +5551,6 @@ export const translations: Record<Lang, Record<string, string>> = {
   // Korean (ko)
   // ─────────────────────────────────────────────
   ko: {
-    howItWorks: "작동 방식",
     "downloadData": "EEG 데이터 다운로드",
     "downloadDataDesc": "다운로드할 학습 패키지를 선택하세요",
     "packBeginner": "입문",
@@ -6007,8 +6000,6 @@ export const translations: Record<Lang, Record<string, string>> = {
     lastUpdatedDate: "최종 업데이트: 2026년 10월 3일",
     allRightsReserved: "모든 권리 보유.",
     termsOfService: "서비스 이용약관",
-    inviteCode: "학교 초대 코드(선택)",
-    inviteCodePlaceholder: "예: NA-8F2C1A",
     backToHome: "홈으로 돌아가기",
     mobileNotOptimized: "이 웹사이트는 모바일 기기에 최적화되어 있지 않습니다. 최상의 경험을 위해 데스크톱 브라우저를 사용하시기 바랍니다.",
     about: "NeuroAccess 정보",
@@ -6441,6 +6432,8 @@ export const translations: Record<Lang, Record<string, string>> = {
     viewInReports: "보고서 보기 →",
     yes: "예",
     login: "로그인",
+    noEegFileTitle: "EEG 파일이 없나요?",
+    noEegFileBody: "EEG 파일이 없어도 걱정하지 마세요. 샘플 파일을 준비해 두었습니다. 다운로드할까요?",
     networkErrorMsg: "네트워크 오류",
     failedToChangePasswordMsg: "비밀번호 변경 실패",
     surveyOther: '기타',

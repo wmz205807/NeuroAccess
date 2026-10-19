@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useLang } from "@/lib/language-context";
 import { useAuth } from "@/lib/auth-context";
 import { Shield, ExternalLink, LogOut } from "lucide-react";
@@ -10,6 +10,7 @@ import { Shield, ExternalLink, LogOut } from "lucide-react";
 export default function PostLoginModals() {
   const { t, lang } = useLang();
   const router = useRouter();
+  const pathname = usePathname() || "/";
   const { user, token, termsAccepted, needsUsernameSetup, acceptTerms, setNeedsUsernameSetup, updateUser, logout } = useAuth();
 
   const [showTerms, setShowTerms] = useState(false);
@@ -33,18 +34,37 @@ export default function PostLoginModals() {
         setShowTerms(false);
         setShowUsernameSetup(true);
       } else {
+        // 已登录且已同意条款 ⇒ 不再弹
         setShowTerms(false);
         setShowUsernameSetup(false);
       }
     } else {
-      setShowTerms(false);
+      // 2026-10-18：**游客进入工作台时**要勾选免责声明 / 隐私政策 / 服务条款。
+      //   只在首页（= 真正以游客身份使用）才要求：
+      //   · 登录页 / 注册页不弹（用户还没选择进入游客模式，不该提前拦）
+      //   · 其他内容页（案例库 / 知识库 / 模拟器）不弹，可以先逛
+      // 用 sessionStorage 记本次访问内的同意（刷新不重复打扰）；
+      // 退站后由 layout.tsx 的内联脚本（依据 na-last-hide > 30s）清掉 ⇒ 下次必须重新勾选。
+      const onAuthPage = pathname.startsWith("/login") || pathname.startsWith("/register");
+      const enterGuestMode = pathname === "/" || pathname === "/dashboard";
+      let guestOk = false;
+      try { guestOk = sessionStorage.getItem("na-guest-consent") === "true"; } catch {}
+      setShowTerms(enterGuestMode && !onAuthPage && !guestOk);
       setShowUsernameSetup(false);
     }
-  }, [user, token, termsAccepted, needsUsernameSetup]);
+  }, [user, token, termsAccepted, needsUsernameSetup, pathname]);
 
-  const handleAcceptTerms = async () => {
-    if (!agreedPrivacy || !agreedTerms || !agreedDisclaimer) return;
-    setTermsLoading(true);
+    const handleAcceptTerms = async () => {
+      if (!agreedPrivacy || !agreedTerms || !agreedDisclaimer) return;
+      // 游客：没有账号，不调后端 acceptTerms；只记本次访问的同意（退站即清）
+      if (!user) {
+        try { sessionStorage.setItem("na-guest-consent", "true"); } catch {}
+        try { localStorage.setItem("neuroaccess-disclaimer-accepted", "true"); } catch {}
+        try { window.dispatchEvent(new Event("neuroaccess:disclaimer-accepted")); } catch {}
+        setShowTerms(false);
+        return;
+      }
+      setTermsLoading(true);
     setTermsError("");
     try {
       const ok = await acceptTerms();
@@ -218,7 +238,7 @@ export default function PostLoginModals() {
               <button
                 onClick={handleAcceptTerms}
                 disabled={!agreedPrivacy || !agreedTerms || !agreedDisclaimer || termsLoading}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-bg)] text-sm font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-bg)] text-sm font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 {termsLoading ? (
                   <>
@@ -239,7 +259,7 @@ export default function PostLoginModals() {
                   logout();
                   router.push("/login");
                 }}
-                className="w-full py-2 px-4 rounded-xl border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg)] text-xs transition-colors flex items-center justify-center gap-1.5"
+                className="w-full min-h-[44px] py-2 px-4 rounded-xl border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg)] text-xs transition-colors flex items-center justify-center gap-1.5"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 {t("logout") || "退出登录"}

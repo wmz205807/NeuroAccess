@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useLang } from "@/lib/language-context";
 import type { Lang } from "@/lib/translations";
-import AnalyzeCasePanel from "@/components/AnalyzeCasePanel";
+import CaseWaveform from "@/components/CaseWaveform";
 
 
 /* 案例数据类型（多语言） */
@@ -857,7 +857,7 @@ export default function CasesPage() {
       className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
     >
       <section className="max-w-6xl mx-auto px-3 sm:px-5 py-4 sm:py-8 pb-[env(safe-area-inset-bottom,16px)]">
         {/* 标题 */}
@@ -889,7 +889,7 @@ export default function CasesPage() {
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
+                  className={`inline-flex min-h-[44px] items-center text-xs px-3 py-1.5 rounded-full border transition-all ${
                     selectedCategory === cat
                       ? "bg-blue-600 text-white dark:bg-blue-500 border-blue-600 dark:bg-blue-600 dark:text-white"
                       : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] border-[var(--color-border)] hover:bg-[var(--color-border)]"
@@ -907,7 +907,7 @@ export default function CasesPage() {
                 <button
                   key={d}
                   onClick={() => setSelectedDifficulty(d)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
+                  className={`inline-flex min-h-[44px] items-center text-xs px-3 py-1.5 rounded-full border transition-all ${
                     selectedDifficulty === d
                       ? "bg-blue-600 text-white dark:bg-blue-500 border-blue-600 dark:bg-blue-600 dark:text-white"
                       : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] border-[var(--color-border)] hover:bg-[var(--color-border)]"
@@ -924,7 +924,7 @@ export default function CasesPage() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[var(--color-text)] focus:outline-none"
+                className="inline-flex min-h-[44px] items-center text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[var(--color-text)] focus:outline-none"
               >
                 <option value="default">{t("casesSortDefault")}</option>
                 <option value="quality">{t("quality")}</option>
@@ -968,10 +968,21 @@ export default function CasesPage() {
                 transition={{ delay: i * 0.015 }}
                 className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] overflow-hidden hover:shadow-lg hover:shadow-gray-900/5 transition-all duration-300"
               >
-                {/* 卡片头部（点击展开） */}
+                {/* 卡片头部（点击展开）—— 2026-10-15：补上按钮语义与键盘支持。
+                    此前是个裸 div：没有 hover 反馈、键盘按不动、读屏也不知道能展开，
+                    也拿不到全站的「按下回弹」。加 role="button" 后自动获得该反馈。 */}
                 <div
-                  className="p-5 cursor-pointer select-none"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  className="cursor-pointer select-none p-5 transition-colors hover:bg-[var(--color-bg)]"
                   onClick={() => toggle(c.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggle(c.id);
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -1021,7 +1032,7 @@ export default function CasesPage() {
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: "auto", opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.05 }}
+                      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
                       className="overflow-hidden"
                     >
                       <div className="px-5 pb-5 space-y-6 border-t border-[var(--color-border)]">
@@ -1124,6 +1135,10 @@ export default function CasesPage() {
                           </div>
                         )}
 
+                        {/* 2026-10-18：原始波形 —— 让用户能对着波形核对上面的频段结论，
+                            而不是只看到"分析"。数据来自 /api/cases/waveform（读 EDF 抽点，零 AI 调用）。 */}
+                        <CaseWaveform caseId={c.id} />
+
                         {/* 标签 */}
                         <div className="flex flex-wrap gap-1.5">
                           {c.tags.map((tag) => (
@@ -1204,11 +1219,9 @@ export default function CasesPage() {
                           </dl>
                         </div>
 
-                        {/* 真实数据可验证：直接分析本案例附带的真实公开数据集片段 */}
-                        <AnalyzeCasePanel caseId={c.id} />
-                      </div>
-                    </motion.div>
-                  )}
+                        </div>
+                      </motion.div>
+                    )}
                 </AnimatePresence>
               </motion.div>
             );

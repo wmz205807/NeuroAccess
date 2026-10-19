@@ -2,16 +2,24 @@
 
 import { getText } from "@/lib/translations";
 import type { Lang } from "@/lib/translations";
+import { addNotification } from "@/components/NotificationToast";
 
 /**
  * CSV 下载：直接导出每个通道的原始波形时间序列 (μV)，
  * 每列一个通道。
+ *
+ * 2026-10-16：把 3 处原生 alert() 换成应用内 toast。
+ * 原生 alert 会冻结整个页面、样式与站点完全脱节，是明确禁止的反模式
+ * （此前只清掉了页面里的，这里漏了）。这是全项目最后一处原生弹窗。
  */
 export async function downloadCSV(reportId: string, fileName: string, lang: Lang = "en") {
   const tx = (key: string) => getText(lang, key);
   try {
     const token = typeof window !== "undefined" ? localStorage.getItem("neuroaccess-token") || "" : "";
-    if (!token) { return void alert(tx("pleaseLoginFirst")); }
+    if (!token) {
+      addNotification(tx("pleaseLoginFirst"), "error");
+      return;
+    }
 
     // 1. 从服务器拉报告
     const resp = await fetch("/api/reports/get", {
@@ -20,7 +28,10 @@ export async function downloadCSV(reportId: string, fileName: string, lang: Lang
       body: JSON.stringify({ id: reportId }),
     });
     const data = await resp.json();
-    if (!data?.success || !data?.report) { return void alert(tx("serverFetchReportFailed")); }
+    if (!data?.success || !data?.report) {
+      addNotification(tx("serverFetchReportFailed"), "error");
+      return;
+    }
 
     const report = data.report;
     const analysis = report.analysis || report;
@@ -71,6 +82,6 @@ export async function downloadCSV(reportId: string, fileName: string, lang: Lang
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
   } catch (e) {
     console.error("CSV error:", e);
-    alert(tx("downloadFailed") + (e as Error).message);
+    addNotification(tx("downloadFailed") + (e as Error).message, "error");
   }
 }

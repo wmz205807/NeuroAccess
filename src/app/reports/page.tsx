@@ -18,6 +18,7 @@ import {
   Star,
   RefreshCw,
 } from "lucide-react";
+import { addNotification } from "@/components/NotificationToast";
 import { useLang } from "@/lib/language-context";
 import { useAuth } from "@/lib/auth-context";
 import { formatDuration } from "@/lib/duration";
@@ -388,7 +389,8 @@ export default function ReportsPage() {
       printWin.document.close();
     } else {
       // 弹窗被拦截，提示用户允许弹窗
-      alert(t("popupBlocked"));
+      // 2026-10-15：原生 alert 会冻结整个页面、样式与站点脱节，改用应用内通知
+      addNotification(t("popupBlocked"), "error");
     }
   };
 
@@ -458,7 +460,7 @@ export default function ReportsPage() {
       className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
     >
       <section className="mx-auto max-w-6xl px-3 sm:px-5 py-4 sm:py-8 pb-[env(safe-area-inset-bottom,16px)]">
         {/* 标题栏 */}

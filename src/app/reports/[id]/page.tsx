@@ -70,7 +70,18 @@ export default function ReportDetailPage() {
     const loadServerReport = async () => {
       const serverReport = await fetchServerReport(id).catch(() => null);
       if (serverReport?.analysis) {
-        if (!cancelled && (!found || !hasLocalWp || localWpStale)) {
+        // 2026-10-18：原来只要「本地有新格式波形」就绝不覆盖 ⇒ 永远用 localStorage 里那份。
+        // 但 localStorage 存的是 /api/analyze 的**降采样**预览（63 通道长文件只剩 ~21 点/秒），
+        // 而服务器返回的是 DB 里的**全分辨率**（/api/reports/get 不再抽稀）⇒ 画出来一条稀疏折线，
+        // 用户判定「很假」。这里改成**比点数**：服务器明显更密就用服务器的。
+        const srvChs = (serverReport.analysis as any)?.waveform_preview?.channels || {};
+        const srvNames = Object.keys(srvChs);
+        const srvPts = srvNames.length ? (srvChs[srvNames[0]] || []).length : 0;
+        const locChs = (localWp as any)?.channels || {};
+        const locNames = Object.keys(locChs);
+        const locPts = locNames.length ? (locChs[locNames[0]] || []).length : 0;
+        const serverRicher = srvPts > locPts * 1.2;
+        if (!cancelled && (!found || !hasLocalWp || localWpStale || serverRicher)) {
           setReport(serverReport as StoredReport);
         }
         try { addReport(serverReport as StoredReport); } catch {}
@@ -152,7 +163,7 @@ export default function ReportDetailPage() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
     >
       {/* Header with back button */}
       <div className="px-6 pt-6 flex items-center justify-between">

@@ -319,7 +319,7 @@ export default function GuidePage() {
               key={card.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.01, duration: 0.05 }}
+              transition={{ delay: Math.min(i * 0.035, 0.25), duration: 0.35, ease: [0.22, 0.8, 0.22, 1] }}
             >
               <KnowledgeCard card={card} />
             </motion.div>

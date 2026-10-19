@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
+import { X, CheckCircle2, AlertTriangle, Info } from "lucide-react";
 
 interface Notification {
   id: string;
@@ -87,34 +87,55 @@ export default function NotificationToast() {
   if (!enabled) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[10001] flex flex-col gap-2 max-w-sm pointer-events-none">
+    /* 2026-10-15 反馈通道改造：
+       · 宽度改为 min(24rem, 100vw-2rem)，小屏不再溢出
+       · 配色改走设计 token（原来写死 emerald-950/red-950，浅色模式下会变成黑底）
+       · 图标 + 左侧色条区分「成功 / 失败 / 提示」，扫一眼就能分辨
+       · 补 role="status"/"alert" 与 aria-live，让读屏软件也能收到反馈 */
+    <div className="fixed top-4 right-4 z-[10001] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2 pointer-events-none">
       <AnimatePresence>
-        {notifications.map((n) => (
-          <motion.div
-            key={n.id}
-            initial={{ opacity: 0, x: 50 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 50 }}
-            className={`rounded-xl px-4 py-3 shadow-lg border text-sm flex items-start gap-2 pointer-events-auto ${
-              n.type === "success"
-                ? "bg-emerald-950/90 border-emerald-700/50 text-emerald-300"
-                : n.type === "error"
-                  ? "bg-red-950/90 border-red-700/50 text-red-300"
-                  : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)]"
-            }`}
-          >
-            <span className="flex-1">{n.message}</span>
-            <button
-              onClick={() => {
-                _notifications = _notifications.filter((x) => x.id !== n.id);
-                notify(_listeners);
-              }}
-              className="text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
+        {notifications.map((n) => {
+          const isError = n.type === "error";
+          const isSuccess = n.type === "success";
+          return (
+            <motion.div
+              key={n.id}
+              initial={{ opacity: 0, x: 50 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 50 }}
+              // 无障碍：错误用 role="alert"（立即播报），其余用 role="status"（礼貌播报）
+              role={isError ? "alert" : "status"}
+              aria-live={isError ? "assertive" : "polite"}
+              className={`pointer-events-auto flex items-start gap-2.5 rounded-xl border border-l-2 bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-text)] ${
+                isError
+                  ? "border-[var(--color-border)] border-l-[var(--color-danger)]"
+                  : isSuccess
+                    ? "border-[var(--color-border)] border-l-[var(--color-ok)]"
+                    : "border-[var(--color-border)] border-l-[var(--color-primary)]"
+              }`}
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </motion.div>
-        ))}
+              {isError ? (
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-danger)]" aria-hidden="true" />
+              ) : isSuccess ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-ok)]" aria-hidden="true" />
+              ) : (
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
+              )}
+              <span className="flex-1 leading-relaxed">{n.message}</span>
+              <button
+                type="button"
+                aria-label="Close notification"
+                onClick={() => {
+                  _notifications = _notifications.filter((x) => x.id !== n.id);
+                  notify(_listeners);
+                }}
+                className="shrink-0 rounded p-0.5 text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+          );
+        })}
       </AnimatePresence>
     </div>
   );

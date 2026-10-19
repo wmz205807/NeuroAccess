@@ -96,7 +96,9 @@ export function buildWaveformSvg(analysis: any, page = 0): string {
   const PLOT_W = 1300;
   const W = LW + PLOT_W + 15;
   // laneH 只决定相邻通道"基线的行距"，不再限制波形自身的上下幅度。
-  const laneH = 34;
+  // 2026-10-18：通道多时适度压缩行距 —— 63 通道 × 34px ≈ 2200px，滚动太长；
+  // 只压行距（振幅会按同一比例跟着缩），波形"可超出本行"的策略不变。
+  const laneH = nch > 48 ? 22 : nch > 24 ? 27 : 34;
   const svg: string[] = [];
 
   // 朴素直接渲染：每个横向像素列取列内偏离最大的样本（仅性能降采样，忠实反映数据）
@@ -133,22 +135,38 @@ export function buildWaveformSvg(analysis: any, page = 0): string {
     drawn.push({ xs, ys });
   }
 
-  // ── 全局振幅基准：用"实际画出来的点"的 p95 ──
-  // 每列取的是列内最极端样本，抽样后的点本身就偏极端；若仍按原始样本的 p90 定标，
-  // 会有远超 10% 的点触顶变成平顶。按抽样点自身取 p95，触顶比例才可控。
-  const allAbs: number[] = [];
-  for (const dd of drawn) for (const v of dd.ys) allAbs.push(Math.abs(v));
-  if (allAbs.length < 2) return "";
-  allAbs.sort((a, b) => a - b);
-  const GLOBAL_REF = allAbs[Math.min(Math.round(allAbs.length * 0.95), allAbs.length - 1)] || 1;
-  // 0.45：p95 幅值落在通道行距的 ±45% 处，正常波形之间留出可见间隔；
-  // 超过这个幅度的尖峰不再被削平，按真实高度画出去。
-  const scBase = (laneH * 0.45) / GLOBAL_REF;
+  // ── 振幅基准：**逐通道自动基准 + 全局下限**（2026-10-19 定案）──
+  // 每列取的是列内最极端样本，抽样后的点本身就偏极端；按抽样点自身取 p95，触顶比例才可控。
+  //
+  // 历史教训（都实测过，别再走回头路）：
+  //   ① 全局单基准（2026-10-18 之前）：真实 EEG 通道间振幅差可达 10 倍以上，
+  //      安静通道按全局 p95 定标后只剩行距的 10~30%，行间大片空白 → 用户判「假」。
+  //   ② 全局 p99（2026-10-18 试过）：真实脑电幅值长尾极重，p99 被少数大伪迹撑高，
+  //      绝大多数通道被压成几乎直线 → 更假，已回退。
+  //   ③ 纯逐通道归一化：一条接近静息的噪声通道会被放大成满幅"假信号"。
+  // ⇒ 定案：**每通道用自己的 p95 定标，但设全局下限** ref_i = max(ch_p95, GLOBAL_p95 × 0.25)。
+  //   效果：正常通道各自占满行距（EDFbrowser / MNE 的默认行为就是逐通道自动增益），
+  //   真实的通道间振幅差异在 4 倍以内仍然保留，超出的（通常是伪迹通道）被压到下限档。
+  //   均匀数据（如 8 通道合成 α 文件）每通道 p95 ≈ 全局 p95 ⇒ 效果与旧版完全一致。
+  const GLOBAL_REF = (() => {
+    const allAbs: number[] = [];
+    for (const dd of drawn) for (const v of dd.ys) allAbs.push(Math.abs(v));
+    if (allAbs.length < 2) return 0;
+    allAbs.sort((a, b) => a - b);
+    return allAbs[Math.min(Math.round(allAbs.length * 0.95), allAbs.length - 1)] || 0;
+  })();
+  if (!(GLOBAL_REF > 0)) return "";
+  const CH_FLOOR = GLOBAL_REF * 0.25;
+  // 每通道：落点取行距 ±34%（真实 EEG 高频细节密，占满行距会糊；EDFbrowser 默认观感约 ±30%）
+  const chRef: number[] = drawn.map(dd => {
+    const abs = dd.ys.map(v => Math.abs(v)).sort((a, b) => a - b);
+    const p95 = abs[Math.min(Math.round(abs.length * 0.95), abs.length - 1)] || 0;
+    return Math.max(p95, CH_FLOOR) || GLOBAL_REF;
+  });
+  const chScale: number[] = chRef.map(ref => (laneH * 0.34) / ref);
 
-  // 画布上下留白：保证最上/最下通道的超幅尖峰也不会被画布本身截断
-  let maxOff = 0;
-  for (const dd of drawn) for (const v of dd.ys) { const o = Math.abs(v) * scBase; if (o > maxOff) maxOff = o; }
-  const PAD = Math.max(Math.round(laneH * 0.9), Math.ceil(maxOff - laneH / 2) + 6);
+  // 画布上下留白：软限幅渐近线为行距 62%（见下方 tanh 注释），PAD 盖住它即可
+  const PAD = Math.max(Math.round(laneH * 0.9), Math.ceil(laneH * 0.62 - laneH / 2) + 6);
   const H = laneH * nch + PAD * 2 + 30;
   svg.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="background:#1a1a2e;font-family:monospace">`);
   // 渲染策略（2026-10-04 定案）：
@@ -168,11 +186,17 @@ export function buildWaveformSvg(analysis: any, page = 0): string {
     );
     const { xs, ys } = drawn[i];
     if (xs.length < 2) continue;
-    const sc = scBase;  // 全局统一缩放（保留各通道真实振幅差异）
-    let d = `M${xs[0].toFixed(1)},${(y - ys[0] * sc).toFixed(2)}`;
-    for (let j = 1; j < xs.length; j++) {
-      d += ` L${xs[j].toFixed(1)},${(y - ys[j] * sc).toFixed(2)}`;
-    }
+      // ── 软限幅（逐通道基准版）────────────────────────────────
+      // 大信号被平滑压回来：① 永不越出本通道行 ② 无平顶 ③ 正常幅度保持线性。
+      // 渐近线取行距的 62%：本通道 p95（= 34% 行距）落在 tanh 线性段，
+      // 大伪迹被平滑压到 62% 以内，不会串到相邻通道。
+      const scBase = chScale[i];
+      const Lp = (laneH * 0.62) / scBase;          // 归一化空间里的限幅点
+      const clip = (v: number) => Lp * Math.tanh(v / Lp) * scBase;
+      let d = `M${xs[0].toFixed(1)},${(y - clip(ys[0])).toFixed(2)}`;
+      for (let j = 1; j < xs.length; j++) {
+        d += ` L${xs[j].toFixed(1)},${(y - clip(ys[j])).toFixed(2)}`;
+      }
     svg.push(`<path d="${d}" stroke="${LINE_COLOR}" stroke-width="1.0" fill="none" opacity="0.9"/>`);
   }
 
@@ -188,6 +212,16 @@ export function buildWaveformSvg(analysis: any, page = 0): string {
     if (k > 0) svg.push(`<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${H - 22}" stroke="#2a2a4e" stroke-width="0.5" stroke-dasharray="1 4" opacity="0.6"/>`);
     svg.push(`<text x="${x.toFixed(1)}" y="${H - 7}" fill="#9aa" font-size="11" text-anchor="middle">${(t - t0Total).toFixed(0)}s</text>`);
     k++;
+  }
+  // 2026-10-18：末尾补刻度。窗口终点通常不是 tickStep 的整数倍
+  //（20s 的文件 tEnd=19.992 ⇒ 循环在 18s 就 break），
+  // 于是波形一直画到 20s、坐标轴却只标到 18s，右侧一截裸奔。
+  {
+    const lastTickT = tStart + (k - 1) * tickStep;
+    if (k > 0 && tEnd - lastTickT > tickStep * 0.35) {
+      const xEnd = LW + PLOT_W;
+      svg.push(`<text x="${xEnd}" y="${H - 7}" fill="#9aa" font-size="11" text-anchor="end">${(tEnd - t0Total).toFixed(0)}s</text>`);
+    }
   }
   svg.push("</svg>");
   return svg.join("");

@@ -16,7 +16,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (usernameOrEmail: string, password: string, cfToken?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean; termsAccepted?: boolean; needsUsernameSetup?: boolean }>;
-  register: (username: string, email: string, password: string, code?: string, cfToken?: string, inviteCode?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean }>;
+  register: (username: string, email: string, password: string, code?: string, cfToken?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean }>;
   sendLoginCode: (email: string) => Promise<{ success: boolean; error?: string; emailSent?: string }>;
   loginWithCode: (email: string, code: string, cfToken?: string) => Promise<{ success: boolean; error?: string; needsCaptcha?: boolean; termsAccepted?: boolean; needsUsernameSetup?: boolean }>;
   logout: () => void;
@@ -278,11 +278,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (username: string, email: string, password: string, code: string = "", cfToken?: string, inviteCode?: string): Promise<{ success: boolean; error?: string; needsCaptcha?: boolean }> => {
+  const register = async (username: string, email: string, password: string, code: string = "", cfToken?: string): Promise<{ success: boolean; error?: string; needsCaptcha?: boolean }> => {
     try {
       const params = new URLSearchParams({ username, email, password, code });
       if (cfToken) params.append("cf_turnstile_response", cfToken);
-      if (inviteCode) params.append("invite_code", inviteCode);
       const resp = await fetch(`${API_BASE}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },

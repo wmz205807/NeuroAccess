@@ -1480,7 +1480,7 @@ def _research_expansion_text(a: Dict, lang: str) -> str:
     """
     try:
         ext = call_ollama(_build_prompt(a, "research", lang) + RESEARCH_EXPANSION_SUFFIX,
-                          timeout=120, max_tokens=2000)
+                          timeout=30, max_tokens=1200)
         txt = str(ext.get("text", "")).strip() if ext.get("success") else ""
         if not txt:
             return ""
@@ -1508,7 +1508,7 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
         "research": template_research(a, lang),
     }
     # 各档的 max_tokens：入门短小、学习中等、研究最长（600-750 字目标，留足余量防截断）
-    _MAX_TOKENS = {"beginner": 200, "student": 450, "research": 1500}
+    _MAX_TOKENS = {"beginner": 200, "student": 450, "research": 1100}
 
     def _call_level(level: str) -> str:
         try:
@@ -1577,7 +1577,7 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
                 results[key] = fallbacks[key]
         # 并行预取的扩展文本：此时首批已经跑完，它多半也已完成（内部 120s 超时兜底）
         try:
-            research_long = future_research_long.result(timeout=130)
+            research_long = future_research_long.result(timeout=8)
         except Exception as e:
             print(f"[explanations] research expansion future err {lang}: {e}", flush=True)
             research_long = ""

@@ -9,7 +9,6 @@ import { useAuth } from "@/lib/auth-context";
 import { useAnalysis } from "@/lib/analysis-context";
 import DownloadDataButton from "@/components/DownloadDataButton";
 import { useDownloadBtnHidden } from "@/lib/download-btn-state";
-import GuestLanding from "@/components/GuestLanding";
 import AnalysisSteps from "@/components/AnalysisSteps";
 import ReportEEGChart from "@/components/ReportEEGChart";
 import {
@@ -24,8 +23,9 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
-  Cpu, Pause, RefreshCw, RotateCcw,
-} from "lucide-react";
+    Cpu, Pause, RefreshCw, RotateCcw,
+    Info,
+  } from "lucide-react";
 
 type Status = "pending" | "reading" | "computing" | "analysisReady" | "explaining" | "completed" | "failed";
 
@@ -452,32 +452,35 @@ function DashboardInner() {
   } = useAnalysis();
 
   // ── 游客体验状态 ────────────────────────────────────────────────
-  const [busySample, setBusySample] = useState<string | null>(null);
   const isGuest = !user;
   const guestTxt = GUEST_TXT[(lang as GL)] || GUEST_TXT.en;
 
-  // 游客最近一份可展示的结果（就地展示，不写数据库）
-  // 注意：此前只挑 "sample-" 前缀，导致游客「上传自己的 .edf」分析完成后
-  // 结果无处可看 —— 因为 FileCard 里的 "View report →" 对游客是隐藏的。
-  // 这里放宽为「任何已产出 result 的文件」，与「先体验、后提示注册」的设计一致。
-  const guestFile = isGuest
-    ? [...files].reverse().find((f: any) => f.result)
-    : undefined;
+  // 游客已完成的分析（就地展示，不写数据库）
+  // 2026-10-18：**改成取「所有已完成的文件」**。原来只用 find() 取最近一个
+  //   ⇒ 游客同时分析两个文件时，第二个把第一个顶掉，只看到一份报告
+  //   （用户报「同时分析两个文件为什么只能产出一份报告」）。
+  // 仍要求 status === "completed"：六步全走完（含 AI 分级解读）才展示，避免第 6 步未完成就出报告。
+  const guestFiles = isGuest
+    ? files.filter((f: any) => f.result && f.status === "completed")
+    : [];
 
-  const handleTrySample = useCallback(async (sampleId: string) => {
-    const gt = GUEST_TXT[(lang as GL)] || GUEST_TXT.en;
-    setBusySample(sampleId);
-    try {
-      await analyzeSample(sampleId, gt.sampleNames[sampleId] || sampleId);
-      // 结果渲染后滚到结果区
-      setTimeout(() => {
-        const el = typeof document !== "undefined" ? document.getElementById("guest-result") : null;
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 600);
-    } finally {
-      setBusySample(null);
-    }
-  }, [analyzeSample, lang]);
+  // ── 游客分析配额标注（2026-10-18）────────────────────────────
+  // 用户要求「游客模式下要标注」：把上限常驻显示出来，不能等第 4 次才蹦错误。
+  // 数据来自 GET /api/guest-quota；每次多出一份完成结果时刷新（分析成功后已计入）。
+  const [guestQuota, setGuestQuota] = useState<{ limit: number; used: number; remaining: number } | null>(null);
+  useEffect(() => {
+    if (!isGuest) { setGuestQuota(null); return; }
+    let cancelled = false;
+    fetch("/api/guest-quota")
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled && j?.success && j.guest) setGuestQuota({ limit: j.limit, used: j.used, remaining: j.remaining }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isGuest, guestFiles.length]);
+
+  // 2026-10-15：原先这里有个 handleTrySample（游客落地区的「试试示例 EEG」按钮用），
+  // 落地区整页删除后它已无人调用，连同 busySample 状态一起移除。
+  // 游客现在直接上传自己的 .edf 使用工作台。
 
   // ── 自动展开最近的活动文件（页面切换回来时显示当前进度）─────────
   useEffect(() => {
@@ -539,43 +542,58 @@ function DashboardInner() {
   // 分析进行中 = 正在运行且未暂停（暂停后可以继续上传文件）
   const hasActiveAnalysis = running && !paused;
 
-  // ── 会话校验期间（含服务端渲染阶段）──────────────────────────────
-  // useAuth().loading 的初值就是 true，且服务端不执行 effect —— 也就是说 SSR 阶段
-  // 必然走这个分支。此前这里只渲染一个转圈，导致首页**初始 HTML 里没有任何正文**：
-  // 搜索引擎 / AI 搜索 / 链接预览 / 关闭 JavaScript 的环境都读不到这个网站是什么。
-  //
-  // 现在直接渲染游客落地区（与校验完成后的游客视图完全一致 → 客户端水合后不跳变），
-  // 让以下内容进入初始 HTML：站点定位与介绍、How NeuroAccess Works 流程、示例 EEG、
-  // EEG Knowledge / EEG Simulator / Case Studies 入口、隐私说明（服务器处理 + 分析后即删）。
-  //
-  // 分工：HTML 负责表达「这个网站是什么」，JS 只负责交互（上传、分析、模拟器等）。
-  if (loading) {
-    return (
-      <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6 px-3 sm:px-6 py-4 sm:py-8 pb-[env(safe-area-inset-bottom,16px)]">
-        <GuestLanding onTrySample={handleTrySample} busySample={busySample} />
-      </div>
-    );
-  }
-  if (!user) {
-    // 游客不再被登录墙拦住：下方直接渲染 GuestLanding + 完整分析工作台
-    // （游客可跑示例、也可上传自己的 .edf；只是报告不落库、不绑定账户）
-  }
+  // 2026-10-15：游客落地区（GuestLanding）已按用户要求**整页彻底删除**。
+  // 游客与登录用户一样，直接看到分析工作台。
+  // 因此这里不再有 loading 早返回分支：SSR 阶段 user 尚为 undefined，会直接落到
+  // 下面的主 return 渲染工作台，客户端水合后也不跳变。
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.05 }}
+      transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
       className="mx-auto max-w-5xl space-y-4 sm:space-y-6 px-3 sm:px-6 py-4 sm:py-8 pb-[env(safe-area-inset-bottom,16px)]"
     >
-      {/* ── 游客落地区：第一次访问就能理解并「立刻试」──────────── */}
-      {isGuest && <GuestLanding onTrySample={handleTrySample} busySample={busySample} />}
+      {/* 2026-10-16：游客落地区删除后，首页**一个 h1 都没有了** —— 对 SEO 与读屏
+          都是缺陷。这里补一个**视觉隐藏**的 h1：语义上有标题，外观完全不变。 */}
+      <h1 className="sr-only">{t("uploadEEG")}</h1>
 
-      {/* 网站介绍（登录用户看工作台说明；游客已有 Hero，不重复） */}
-      {!isGuest && (
-        <div className="rounded-2xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 p-5 text-sm leading-relaxed text-[var(--color-text)]">
-          {t("siteIntro")}
-          <span className="mt-2 block font-semibold text-blue-600 dark:text-blue-400 text-sm">{t("freePlatform")}</span>
+      {/* 网站介绍 —— 2026-10-18：**游客也显示**。
+          原来的条件是 `!isGuest`，理由是「游客已有 Hero，不重复」；
+          但游客落地区（含 Hero）整页删除后，游客首页就只剩一个上传框、一句说明都没有。
+          现在两条路径都展示这段定位说明，游客第一次进来也能知道这是干什么的。 */}
+      <div className="rounded-2xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 p-5 text-sm leading-relaxed text-[var(--color-text)]">
+        {t("siteIntro")}
+        <span className="mt-2 block font-semibold text-blue-600 dark:text-blue-400 text-sm">{t("freePlatform")}</span>
+      </div>
+
+      {/* 游客配额标注（2026-10-18 用户要求）—— 常驻显示上限与剩余次数 */}
+      {isGuest && guestQuota && (
+        <div
+          className={`flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs leading-5 ${
+            guestQuota.remaining > 0
+              ? "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)]"
+              : "border-amber-300/60 bg-amber-50/70 text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-300"
+          }`}
+        >
+          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+          <span>
+            {guestQuota.remaining > 0
+              ? (lang === "zh"
+                  ? `游客模式：最多可分析 ${guestQuota.limit} 个文件，还剩 ${guestQuota.remaining} 次。注册后不限次数。`
+                  : `Guest mode: up to ${guestQuota.limit} files, ${guestQuota.remaining} left. Register for unlimited analyses.`)
+              : (lang === "zh"
+                  ? `游客模式：${guestQuota.limit} 次已用完。注册后可继续分析。`
+                  : `Guest mode: all ${guestQuota.limit} analyses used. Register to continue.`)}
+            {guestQuota.remaining <= 0 && (
+              <Link
+                href="/register"
+                className="ml-1.5 font-semibold text-[var(--color-primary)] hover:underline"
+              >
+                {lang === "zh" ? "去注册 →" : "Sign up →"}
+              </Link>
+            )}
+          </span>
         </div>
       )}
 
@@ -583,6 +601,28 @@ function DashboardInner() {
       <div className="space-y-6" id="upload">
         {/* Upload area */}
         {!hasActiveAnalysis ? (
+          (isGuest && guestQuota && guestQuota.remaining <= 0) ? (
+            /* 游客额度用完 ⇒ 上传区直接不可用（2026-10-18 用户要求「不能继续分析」） */
+            <div className="rounded-3xl border-2 border-dashed border-amber-300/70 bg-amber-50/60 p-6 sm:p-10 text-center dark:border-amber-700/40 dark:bg-amber-950/20">
+              <Info className="mx-auto mb-3 h-8 w-8 text-amber-500" />
+              <p className="text-sm font-semibold text-[var(--color-text)]">
+                {lang === "zh"
+                  ? `游客模式已用完 ${guestQuota.limit} 次分析额度`
+                  : `Guest limit reached (${guestQuota.limit} analyses)`}
+              </p>
+              <p className="mt-1.5 text-xs leading-6 text-[var(--color-text-secondary)]">
+                {lang === "zh"
+                  ? "注册后不限次数，还能把报告保存到账号里。"
+                  : "Register for unlimited analyses and to save your reports."}
+              </p>
+              <Link
+                href="/register"
+                className="mt-3 inline-flex rounded-xl bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-[var(--color-bg)] transition-opacity hover:opacity-90"
+              >
+                {lang === "zh" ? "免费注册 →" : "Sign up free →"}
+              </Link>
+            </div>
+          ) : (
           <label
             className="rounded-3xl border-2 border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-10 text-center shadow-sm transition-colors hover:border-[var(--color-text-secondary)] active:border-[var(--color-primary)] cursor-pointer min-h-[160px] flex flex-col items-center justify-center w-full"
             onDragOver={(e) => { e.preventDefault(); }}
@@ -590,7 +630,7 @@ function DashboardInner() {
           >
             <UploadCloud className="mx-auto mb-2 sm:mb-4 h-6 w-6 sm:h-10 sm:w-10 text-[var(--color-text-secondary)]" />
             <span className="block text-xs sm:text-base font-medium text-[var(--color-text)]">{t("dragOrClick")}</span>
-            <span className="mt-1 block text-[10px] sm:text-sm text-[var(--color-text-secondary)]">{t("supportedFormats")}</span>
+            <span className="mt-1 block text-[11px] sm:text-sm text-[var(--color-text-secondary)]">{t("supportedFormats")}</span>
             <input
               type="file"
               multiple
@@ -598,6 +638,7 @@ function DashboardInner() {
               onChange={(e) => { handleFileSelect(e.target.files); if (e.target) e.target.value = ""; }}
             />
           </label>
+          )
         ) : (
           <div
             className="rounded-3xl border-2 border-dashed border-[var(--color-border)] bg-[var(--color-surface)]/50 p-10 text-center opacity-60"
@@ -607,7 +648,8 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* 下载测试文件按钮（弹窗选择学习包；可隐藏移入设置） */}
+        {/* 下载测试文件按钮（弹窗选择学习包；可隐藏移入设置）。
+            2026-10-18：按用户要求恢复右下角悬浮形态（原位置）。 */}
         {!hasActiveAnalysis && !downloadHidden && (
           <DownloadDataButton fixed />
         )}
@@ -679,10 +721,12 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* ── 游客结果：就地展示完整分析 + 提示注册保存 ────────── */}
-        {isGuest && guestFile?.result && (
+        {/* ── 游客结果：每个已完成的文件各出一份 + 末尾一次注册提示 ────────── */}
+        {isGuest && guestFiles.length > 0 && (
           <>
-            <GuestResultView analysis={guestFile.result} />
+            {guestFiles.map((f: any) => (
+              <GuestResultView key={f.id} analysis={f.result} />
+            ))}
             <div className="rounded-2xl border border-blue-200/60 bg-blue-50/70 p-4 dark:border-blue-800/40 dark:bg-blue-950/30">
               <div className="text-sm font-bold text-[var(--color-text)]">{guestTxt.saveTitle}</div>
               <p className="mt-1 text-xs leading-6 text-[var(--color-text-secondary)]">{guestTxt.saveBody}</p>

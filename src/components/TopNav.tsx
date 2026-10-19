@@ -76,13 +76,13 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
         {/* 移动端菜单按钮 — lg以上隐藏；游客同样可用（游客也需要导航与语言/主题入口） */}
         <button
           onClick={() => setMobileMenuOpen(true)}
-          className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors text-[var(--color-text-secondary)]"
+          className="lg:hidden inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors text-[var(--color-text-secondary)]"
           aria-label="Open menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+        <Link href="/" className="flex min-h-[44px] items-center gap-3 hover:opacity-80 transition-opacity">
           <span className="text-sm font-semibold text-[var(--color-text)]">NeuroAccess</span>
           <span className="text-xs text-[var(--color-text-secondary)]">v2.0</span>
         </Link>
@@ -103,7 +103,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
         {user ? (
           <button
             onClick={() => router.push("/account")}
-            className="flex items-center gap-2 p-1.5 rounded-full hover:bg-[var(--color-border)] transition-colors"
+            className="flex min-h-[44px] items-center gap-2 p-1.5 rounded-full hover:bg-[var(--color-border)] transition-colors"
           >
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
@@ -144,7 +144,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
       }`}>
           <div className="flex items-center justify-between h-14 px-4 border-b border-[var(--color-border)]">
             <span className="text-sm font-semibold text-[var(--color-text)]">NeuroAccess</span>
-            <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors">
+            <button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors">
               <X className="w-5 h-5 text-[var(--color-text-secondary)]" />
             </button>
           </div>
@@ -158,7 +158,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
                     <Link
                       href={item.href}
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+                      className={`flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
                         isActive
                           ? "bg-[var(--color-accent)] text-[var(--color-bg)] font-semibold"
                           : "text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)]"
@@ -176,7 +176,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
           <div className="p-4 border-t border-[var(--color-border)] space-y-1">
             <button
               onClick={() => { setMobileMenuOpen(false); setSettingsOpen(true); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
+              className="w-full flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
             >
               <Settings className="w-5 h-5 flex-shrink-0" />
               <span className="font-medium">{t("settings")}</span>
@@ -194,7 +194,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
             {user && (
               <button
                 onClick={() => { setMobileMenuOpen(false); logout(); router.push("/"); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
+                className="w-full flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
               >
                 <LogOut className="w-5 h-5 flex-shrink-0" />
                 <span className="font-medium">{t("logout")}</span>

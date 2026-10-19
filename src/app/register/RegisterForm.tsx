@@ -9,6 +9,7 @@ import Link from "next/link";
 import { translations } from "@/lib/translations";
 import AuthSettingsBar from "@/components/AuthSettingsBar";
 import TurnstileModal from "@/components/TurnstileModal";
+import { Loader2 } from "lucide-react";
 
 interface RegisterFormProps {
   lang: string;
@@ -37,7 +38,6 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [codeSentMsg, setCodeSentMsg] = useState(false);
@@ -47,7 +47,7 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
   // ── Turnstile 人机验证 ──
   const [turnstileOpen, setTurnstileOpen] = useState(false);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
-  const pendingRegRef = useRef<{ username: string; email: string; password: string; code: string; inviteCode?: string } | null>(null);
+  const pendingRegRef = useRef<{ username: string; email: string; password: string; code: string } | null>(null);
   const turnstileRetryRef = useRef(0);
   const [devCode, setDevCode] = useState("");
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -107,10 +107,10 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
     if (password !== confirmPassword) { setError(tf("passwordMismatch", "Passwords do not match")); return; }
     setSubmitting(true);
     try {
-      const result = await register(username, email, password, code, undefined, inviteCode);
+      const result = await register(username, email, password, code);
       if (result.success) { router.push("/"); }
       else if (result.needsCaptcha) {
-        pendingRegRef.current = { username, email, password, code, inviteCode };
+        pendingRegRef.current = { username, email, password, code };
         setTurnstileOpen(true);
       }
       else { setError(result.error || tf("registerFailed", "Registration failed")); }
@@ -123,7 +123,7 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
     try {
       const pending = pendingRegRef.current;
       if (!pending) { setError(tf("verificationStateLost", "Verification state lost, please register again")); setTurnstileOpen(false); return; }
-      const result = await register(pending.username, pending.email, pending.password, pending.code, cfToken, pending.inviteCode);
+      const result = await register(pending.username, pending.email, pending.password, pending.code, cfToken);
       if (result.success) { turnstileRetryRef.current = 0; window.location.assign("/"); }
       else if (result.needsCaptcha) {
         // token 无效/过期：保留 pending，重开验证弹窗重试；超过 3 次停止，避免无限闪烁
@@ -149,7 +149,7 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
   };
 
   return (
-    <motion.div className="min-h-full flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.05 }}>
+    <motion.div className="min-h-full flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}>
       <div className="absolute top-4 right-4 z-20"><AuthSettingsBar /></div>
       <div className="w-full max-w-md p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto">
         <div className="mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs leading-relaxed text-[var(--color-text)]">
@@ -210,18 +210,12 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("inviteCode", "School invite code (optional)")}</label>
-            <input type="text" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-              placeholder={tf("inviteCodePlaceholder", "e.g. NA-8F2C1A")} maxLength={16} />
-          </div>
-          <div>
             <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("password", "Password")}</label>
             <div className="relative">
               <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3.5 py-2.5 pr-10 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
                 placeholder={tf("password", "Password")} required minLength={6} />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0} aria-label={showPassword ? "Hide password" : "Show password"}>
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0} aria-label={showPassword ? "Hide password" : "Show password"}>
                 {showPassword ? (
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg>
                 ) : (
@@ -239,8 +233,12 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
             </div>
           </div>
           {error && (<div role="alert" aria-live="assertive" className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 dark:text-red-400 text-sm">{error}</div>)}
-          <button type="submit" disabled={submitting} className="w-full py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
-            {submitting ? "..." : tf("registerButton", "Register")}
+          <button type="submit" disabled={submitting} aria-busy={submitting} className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
+            {submitting ? (
+              <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              tf("registerButton", "Register")
+            )}
           </button>
         </form>
         <div className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
