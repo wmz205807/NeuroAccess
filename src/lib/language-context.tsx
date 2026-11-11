@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { getText, Lang } from "@/lib/translations";
 
-const LANGUAGES: Lang[] = ["zh", "en", "es", "fr", "de", "ja", "ko"];
+// 2026-11-09（用户要求）：网站仅保留 中文 / English / Deutsch / 日本語
+const LANGUAGES: Lang[] = ["zh", "en", "de", "ja"];
 
 // 支持的语言变体映射表
 // 键：浏览器语言代码（含变体），值：网站支持的语言代码
@@ -26,22 +27,22 @@ const LANGUAGE_ALIASES: Record<string, Lang> = {
   "en-IE": "en",
   "en-ZA": "en",
   "en-IN": "en",
-  // 西班牙文变体
-  "es": "es",
-  "es-ES": "es",
-  "es-MX": "es",
-  "es-AR": "es",
-  "es-CO": "es",
-  "es-CL": "es",
-  "es-PE": "es",
-  "es-VE": "es",
+  // 西班牙文/法文/韩文变体（2026-11-09：网站不再提供这三种语言，统一回落到英文）
+  "es": "en",
+  "es-ES": "en",
+  "es-MX": "en",
+  "es-AR": "en",
+  "es-CO": "en",
+  "es-CL": "en",
+  "es-PE": "en",
+  "es-VE": "en",
   // 法文变体
-  "fr": "fr",
-  "fr-FR": "fr",
-  "fr-CA": "fr",
-  "fr-BE": "fr",
-  "fr-CH": "fr",
-  "fr-LU": "fr",
+  "fr": "en",
+  "fr-FR": "en",
+  "fr-CA": "en",
+  "fr-BE": "en",
+  "fr-CH": "en",
+  "fr-LU": "en",
   // 德文变体
   "de": "de",
   "de-DE": "de",
@@ -52,8 +53,8 @@ const LANGUAGE_ALIASES: Record<string, Lang> = {
   "ja": "ja",
   "ja-JP": "ja",
   // 韩文变体
-  "ko": "ko",
-  "ko-KR": "ko",
+  "ko": "en",
+  "ko-KR": "en",
 };
 
 /**

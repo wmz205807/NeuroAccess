@@ -25,7 +25,9 @@ export async function downloadCSV(reportId: string, fileName: string, lang: Lang
     const resp = await fetch("/api/reports/get", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id: reportId }),
+      // 2026-11-09：报告接口默认不再下发稠密波形（11MB→311KB），
+      // CSV 需要逐点数据 ⇒ 这里显式要完整版本。
+      body: JSON.stringify({ id: reportId, light: false }),
     });
     const data = await resp.json();
     if (!data?.success || !data?.report) {

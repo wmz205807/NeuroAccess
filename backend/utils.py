@@ -52,8 +52,14 @@ def normalize_language(language: Optional[str]) -> str:
     if not language:
         return "zh"
     lang = language.lower().split("-")[0].split("_")[0]
-    SUPPORTED = {"zh", "en", "es", "fr", "de", "ja", "ko"}
-    return lang if lang in SUPPORTED else "zh"
+    # 2026-11-09（用户要求）：网站仅保留 中文/英文/德语/日语；
+    # 旧的 es/fr/ko 偏好回落到英文（这三种语言的读者本身更可能读英文）。
+    SUPPORTED = {"zh", "en", "de", "ja"}
+    if lang in SUPPORTED:
+        return lang
+    if lang in {"es", "fr", "ko"}:
+        return "en"
+    return "zh"
 
 
 def safe_name(filename: str) -> str:

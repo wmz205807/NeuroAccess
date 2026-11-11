@@ -171,11 +171,8 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 <div className="grid grid-cols-2 gap-1.5">
                   <LangBtn code="en" label="English" active={lang === "en"} onClick={() => setLang("en")} />
                   <LangBtn code="zh" label="中文" active={lang === "zh"} onClick={() => setLang("zh")} />
-                  <LangBtn code="es" label="Español" active={lang === "es"} onClick={() => setLang("es")} />
-                  <LangBtn code="fr" label="Français" active={lang === "fr"} onClick={() => setLang("fr")} />
                   <LangBtn code="de" label="Deutsch" active={lang === "de"} onClick={() => setLang("de")} />
                   <LangBtn code="ja" label="日本語" active={lang === "ja"} onClick={() => setLang("ja")} />
-                  <LangBtn code="ko" label="한국어" active={lang === "ko"} onClick={() => setLang("ko")} />
                 </div>
               </section>
 

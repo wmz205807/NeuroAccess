@@ -1,5 +1,7 @@
 # NeuroAccess
 
+**English** | [简体中文](README.zh-CN.md)
+
 **Open-source AI for Brain Science & EEG Education**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

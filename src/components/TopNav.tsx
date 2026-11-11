@@ -51,6 +51,8 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
 
   // 路由变化时自动关闭移动端侧边栏（防止点击 Link 后菜单仍开）
   useEffect(() => { setMobileMenuOpen(false); }, [pathname]);
+  // 登录/注册页：隐藏移动端汉堡菜单（那两页没有侧边栏，站内导航会把未登录用户弹回登录页）
+  const isAuthPage = pathname.startsWith("/login") || pathname.startsWith("/register");
 
   // SSR 期间 serverLang 正确，客户端水合后 clientLang 正确
   const lang = serverLang || clientLang;
@@ -73,7 +75,8 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
     <header className="h-14 bg-[var(--color-surface)]/85 backdrop-blur-xl border-b border-[var(--color-border)] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40">
       {/* Left: hamburger + logo */}
       <div className="flex items-center gap-3">
-        {/* 移动端菜单按钮 — lg以上隐藏；游客同样可用（游客也需要导航与语言/主题入口） */}
+        {/* 移动端菜单按钮 — lg以上隐藏；登录/注册页不显示（那两页没有侧边栏，也无需站内导航） */}
+        {!isAuthPage && (
         <button
           onClick={() => setMobileMenuOpen(true)}
           className="lg:hidden inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg hover:bg-[var(--color-hover-bg)] transition-colors text-[var(--color-text-secondary)]"
@@ -81,6 +84,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
         >
           <Menu className="w-5 h-5" />
         </button>
+        )}
 
         <Link href="/" className="flex min-h-[44px] items-center gap-3 hover:opacity-80 transition-opacity">
           <span className="text-sm font-semibold text-[var(--color-text)]">NeuroAccess</span>
@@ -106,10 +110,15 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
             className="flex min-h-[44px] items-center gap-2 p-1.5 rounded-full hover:bg-[var(--color-border)] transition-colors"
           >
             <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
-              style={{ backgroundColor: avatarColor }}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white overflow-hidden"
+              style={{ backgroundColor: user?.avatar_url ? "#0b111c" : avatarColor }}
             >
-              {getDisplayInitial(user?.username || "?")}
+              {user?.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                getDisplayInitial(user?.username || "?")
+              )}
             </div>
           </button>
         ) : (
@@ -193,7 +202,7 @@ export default function TopNav({ lang: serverLang }: TopNavProps) {
             )}
             {user && (
               <button
-                onClick={() => { setMobileMenuOpen(false); logout(); router.push("/"); }}
+                onClick={() => { setMobileMenuOpen(false); logout(); router.push("/login"); }}
                 className="w-full flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text)] transition-colors"
               >
                 <LogOut className="w-5 h-5 flex-shrink-0" />

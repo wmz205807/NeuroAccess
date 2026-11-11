@@ -15,11 +15,8 @@ from utils import safe_float, to_jsonable
 LANG_NAME_MAP = {
     "zh": "Chinese",
     "en": "English",
-    "es": "Spanish",
-    "fr": "French",
     "de": "German",
     "ja": "Japanese",
-    "ko": "Korean",
 }
 
 # ── OpenRouter 配置 ─────────────────────────────────────
@@ -101,6 +98,38 @@ def call_ollama(prompt: str, timeout: int = 120, max_tokens: int = 400) -> Dict[
     return call_openrouter(prompt, timeout=timeout, max_tokens=max_tokens)
 
 
+def _repair_dangling_sentence(text: str) -> str:
+    """修复「句子被截断后直接以省略号收尾」的情况（2026-11-09）。
+
+    典型病历：正文以「…没有出现明显的变化，这种以…」结尾，随后又接「推测可能的情况：」，
+    读起来像句子断在半截。这里只在**整段以省略号结束**时动手：
+      1. 去掉结尾的省略号；
+      2. 回退到最后一个句末标点（。！？!?）→ 保留完整句；
+      3. 正文里没有句末标点时，回退到最后一个逗号并补句号；
+      4. 都没有则补句号。
+    不改变正常文本（不以省略号结尾的一律原样返回）。
+    """
+    if not text:
+        return text
+    t = text.rstrip()
+    if t.endswith("…"):
+        core = t[:-1].rstrip()
+    elif t.endswith("..."):
+        core = t[:-3].rstrip()
+    else:
+        return text
+    # 去掉残留的连接词/标点
+    core = core.rstrip("，,、；;：: ")
+    for mark in ("。", "！", "？", "!", "?"):
+        i = core.rfind(mark)
+        if i >= 20:
+            return core[:i + 1]
+    j = max(core.rfind("，"), core.rfind(","))
+    if j >= 20:
+        return core[:j] + "。"
+    return core + "。"
+
+
 def _fmt_duration(a: Dict, lang: str) -> str:
     """按语言格式化录音时长：en→'20 seconds'/'1 min 5 s'，zh→'20秒'/'1分5秒'"""
     sec = a.get("recording_duration_seconds") or a.get("duration_seconds")
@@ -109,6 +138,16 @@ def _fmt_duration(a: Dict, lang: str) -> str:
         m, r = divmod(s, 60)
         if lang == "zh":
             return f"{m}分{r}秒" if m > 0 else f"{r}秒"
+        if lang == "ja":
+            return f"{m}分{r}秒" if m > 0 else f"{r}秒"
+        if lang == "ko":
+            return f"{m}분 {r}초" if m > 0 else f"{r}초"
+        if lang == "de":
+            return f"{m} Min. {r} Sek." if m > 0 else f"{r} Sekunden"
+        if lang == "fr":
+            return f"{m} min {r} s" if m > 0 else f"{r} secondes"
+        if lang == "es":
+            return f"{m} min {r} s" if m > 0 else f"{r} segundos"
         return f"{m} min {r} s" if m > 0 else f"{r} seconds"
     return str(a.get("duration") or "?")
 
@@ -708,7 +747,7 @@ def _parse_duration_seconds(dur) -> float | None:
         return None
 
 
-def _summarize_for_ai(a: Dict) -> Dict:
+def _summarize_for_ai(a: Dict, lang: str = "zh") -> Dict:
     """
     只保留 AI 解释需要的「派生标量指标」，剔除所有数组 / 波形 / 时间序列数据。
     目的：防止把过大的 analysis JSON 直接塞给 qwen2.5-7b（32K 上下文），
@@ -754,7 +793,8 @@ def _summarize_for_ai(a: Dict) -> Dict:
     return {
         "channel_count":            overview.get("channel_count") or a.get("channel_count"),
         "sampling_rate":            overview.get("sampling_rate") or a.get("sampling_rate"),
-        "duration":                 overview.get("duration") or a.get("duration"),
+        # 2026-11-09：按目标语言格式化，避免中文 "1 分 0 秒" 被抄进英文/其他语言解释
+        "duration":                 _fmt_duration(a, lang),
         "duration_seconds":         _dur,
         # 频率分辨率 = 1 / 记录时长（秒）。模型自己做 1/182 这类除法很容易出错，
         # 也可能把「预览窗口 10 秒」误当成记录时长 ⇒ 一律由后端算好。
@@ -792,7 +832,7 @@ def _summarize_for_ai(a: Dict) -> Dict:
 
 def _build_prompt(a: Dict, level: str, lang: str) -> str:
     # 只发送精简后的派生指标，避免超出模型上下文窗口
-    prompt_data = _summarize_for_ai(a)
+    prompt_data = _summarize_for_ai(a, lang)
     payload     = json.dumps(to_jsonable(prompt_data), ensure_ascii=False, indent=2)
 
     # 安全网：硬性限制发给模型的内容长度（qwen2.5-7b 上下文约 32K token ≈ 128K 字符，
@@ -1640,6 +1680,9 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
     # 追加前先去重：推测文本已出现在正文中则跳过（避免"推测段=正文整句复制"的凑数）。
     try:
         for _k, _style in (("beginner", "plain"), ("student", "teaching"), ("research", "research")):
+            # 先修掉「半句 + …」的截断，再决定是否追加推测段
+            if results.get(_k):
+                results[_k] = _repair_dangling_sentence(results[_k])
             _txt = results.get(_k) or ""
             if "推测：" in _txt or "推测可能的情况" in _txt or "Inference:" in _txt:
                 continue
@@ -1688,6 +1731,11 @@ def _generate_explanations_for_lang(analysis: Dict, lang: str) -> Dict[str, str]
                   + ("" if _bn < _st < _rs else "  ⚠️ still-not-increasing"), flush=True)
     except Exception as _e:
         print(f"[explanations] final order exception {lang}: {_e}", flush=True)
+
+    # 最终兜底：三档都做一次「半句收尾」修复（模板档 / 长度截断档同样适用）
+    for _k in ("beginner", "student", "research"):
+        if results.get(_k):
+            results[_k] = _repair_dangling_sentence(results[_k])
 
     return results
 

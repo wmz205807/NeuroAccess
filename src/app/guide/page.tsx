@@ -256,11 +256,16 @@ export default function GuidePage() {
     return cards.filter((card) => {
       const matchCategory = category === "all" || card.category === category;
       const q = search.toLowerCase();
-      const matchSearch = !q ||
-        card.title.toLowerCase().includes(q) ||
-        card.description.toLowerCase().includes(q) ||
-        card.id.includes(q) ||
-        (card.frequency && card.frequency.toLowerCase().includes(q));
+      // 2026-11-10：搜索范围从「标题/描述/频率/id」扩展到卡片详情正文
+      // （what/why/how/pattern/cannotTell），否则搜正文里的词会误判为无结果。
+      const haystack = [
+        card.title,
+        card.description,
+        card.id,
+        card.frequency || '',
+        ...Object.values(card.details || {}),
+      ].join(' ').toLowerCase();
+      const matchSearch = !q || haystack.includes(q);
       return matchCategory && matchSearch;
     });
   }, [cards, category, search]);

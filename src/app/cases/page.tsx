@@ -14,7 +14,6 @@ import {
   Microscope,
   Search,
   Filter,
-  ArrowUpDown,
   Database,
 } from "lucide-react";
 import { useLang } from "@/lib/language-context";
@@ -396,12 +395,16 @@ const CHB_MONTAGE_EN = "bipolar montage, international 10-20 system";
 const DS_MONTAGE_ZH = "单极导联，国际 10-20 系统，闭眼静息态";
 const DS_MONTAGE_EN = "referential montage, international 10-20 system, eyes-closed resting state";
 
+/** 合成教学数据的多语言文案助手：中英各写一份，其余语言回退英文（网站仅启用 zh/en/de/ja）。 */
+const simText = (zh: string, en: string): LangString => ({ zh, en, es: en, fr: en, de: en, ja: en, ko: en });
+const simList = (zh: string[], en: string[]): LangStringArray => ({ zh, en, es: en, fr: en, de: en, ja: en, ko: en });
+
 const cases: CaseStudy[] = [
   {
     id: "c1",
     title: {
-      zh: "癫痫发作期 EEG（真实患者 · 病例 1）",
-      en: "Seizure EEG, Ictal (Real Patient · Case 1)",
+      zh: "癫痫发作期 EEG",
+      en: "Seizure EEG, Ictal",
     },
     categoryKey: "patterns",
     difficultyKey: "advanced",
@@ -449,8 +452,8 @@ const cases: CaseStudy[] = [
   {
     id: "c2",
     title: {
-      zh: "癫痫发作期 EEG（真实患者 · 病例 2）",
-      en: "Seizure EEG, Ictal (Real Patient · Case 2)",
+      zh: "癫痫发作期 EEG",
+      en: "Seizure EEG, Ictal",
     },
     categoryKey: "patterns",
     difficultyKey: "advanced",
@@ -498,8 +501,8 @@ const cases: CaseStudy[] = [
   {
     id: "c3",
     title: {
-      zh: "癫痫发作期 EEG（真实患者 · 病例 3）",
-      en: "Seizure EEG, Ictal (Real Patient · Case 3)",
+      zh: "癫痫发作期 EEG",
+      en: "Seizure EEG, Ictal",
     },
     categoryKey: "patterns",
     difficultyKey: "advanced",
@@ -547,8 +550,8 @@ const cases: CaseStudy[] = [
   {
     id: "c4",
     title: {
-      zh: "癫痫发作间期 EEG（无发作基线）",
-      en: "Interictal EEG (Seizure-Free Baseline)",
+      zh: "癫痫发作间期 EEG",
+      en: "Interictal EEG",
     },
     categoryKey: "patterns",
     difficultyKey: "intermediate",
@@ -596,8 +599,8 @@ const cases: CaseStudy[] = [
   {
     id: "c5",
     title: {
-      zh: "阿尔茨海默病 EEG（真实患者 · MMSE 16）",
-      en: "Alzheimer's Disease EEG (Real Patient · MMSE 16)",
+      zh: "阿尔茨海默病 EEG",
+      en: "Alzheimer's Disease EEG",
     },
     categoryKey: "clinical",
     difficultyKey: "intermediate",
@@ -645,8 +648,8 @@ const cases: CaseStudy[] = [
   {
     id: "c6",
     title: {
-      zh: "阿尔茨海默病 EEG（真实患者 · MMSE 22）",
-      en: "Alzheimer's Disease EEG (Real Patient · MMSE 22)",
+      zh: "阿尔茨海默病 EEG",
+      en: "Alzheimer's Disease EEG",
     },
     categoryKey: "clinical",
     difficultyKey: "intermediate",
@@ -694,8 +697,8 @@ const cases: CaseStudy[] = [
   {
     id: "c7",
     title: {
-      zh: "额颞叶痴呆 EEG（真实患者）",
-      en: "Frontotemporal Dementia EEG (Real Patient)",
+      zh: "额颞叶痴呆 EEG",
+      en: "Frontotemporal Dementia EEG",
     },
     categoryKey: "clinical",
     difficultyKey: "intermediate",
@@ -743,8 +746,8 @@ const cases: CaseStudy[] = [
   {
     id: "c8",
     title: {
-      zh: "健康对照 EEG（同数据集对照组）",
-      en: "Healthy Control EEG (Same Dataset)",
+      zh: "健康对照 EEG",
+      en: "Healthy Control EEG",
     },
     categoryKey: "clinical",
     difficultyKey: "beginner",
@@ -789,6 +792,99 @@ const cases: CaseStudy[] = [
     tags: ["control", "healthy", "alpha", "resting-state", "ds004504", "real-data"],
     readTime: "5 分钟",
   },
+  // ── 2026-11-10 新增：两个初级教学案例（合成数据，明确标注） ──
+  {
+    id: "c9",
+    title: { zh: "α 节律示例", en: "Alpha Rhythm Example" },
+    categoryKey: "patterns",
+    difficultyKey: "beginner",
+    description: {
+      zh: "合成教学片段：8 通道、250 Hz、20 秒，α 频段（8–13 Hz）占主导。用来练习「认出 α 节律」——波形呈规则的正弦样起伏，闭眼放松时最典型。注意：这是模拟器生成的教学数据，不是真实被试记录。",
+      en: "A synthetic teaching segment: 8 channels, 250 Hz, 20 s, dominated by the alpha band (8–13 Hz). Use it to practise recognising alpha rhythm — smooth, regular sinusoidal waves, most typical of relaxed eyes-closed states. Note: this is simulator-generated teaching data, not a real participant recording.",
+    },
+    details: {
+      zh: "1. 数据类型：合成（NeuroAccess EEG 模拟器）\n2. 实测相对频段功率：δ 16.7%、θ 7.9%、α 61.3%、β 10.0%、γ 4.2%\n3. 信号质量 77.1 / 100\n4. 建议与「常见伪迹示例」对照看：一个干净、一个很乱，差别一眼可见",
+      en: "1. Data type: synthetic (NeuroAccess EEG simulator)\n2. Measured relative band power: δ 16.7%, θ 7.9%, α 61.3%, β 10.0%, γ 4.2%\n3. Signal quality 77.1 / 100\n4. Compare it with the 'Common Artifacts Example': one clean, one noisy — the difference is obvious at a glance",
+    },
+    signal_quality: 77.15,
+    learning_readability_score: 92.0,
+    beginner_explanation: {
+      zh: "你会看到一片比较整齐、像波浪一样的节律，每秒大约起伏 8–13 次，这就是 α 波。人在闭眼放松时最容易出现这种波形。",
+      en: "You will see a fairly regular, wave-like rhythm repeating roughly 8–13 times per second — that is alpha. It shows up most clearly when a person is relaxed with eyes closed.",
+    },
+    student_explanation: {
+      zh: "α 占比 61.3%，是五个频段中最高的；δ 与 θ 合计 24.6%。规则的正弦样外观加上稳定的主频，是 α 节律的典型特征。",
+      en: "Alpha accounts for 61.3%, the largest of the five bands; delta and theta together make 24.6%. A regular sinusoidal appearance with a stable dominant frequency is the hallmark of alpha rhythm.",
+    },
+    research_explanation: {
+      zh: "合成信号，8 通道 250 Hz、20 s。相对频段功率 δ 16.7 / θ 7.9 / α 61.3 / β 10.0 / γ 4.2（%），质量评分 77.1。局限：合成数据只用于演示形态学，不可用于任何统计或临床推断。",
+      en: "Synthetic signal, 8 channels at 250 Hz, 20 s. Relative band power δ 16.7 / θ 7.9 / α 61.3 / β 10.0 / γ 4.2 (%), quality score 77.1. Limitation: synthetic data is for morphology demonstration only and must not be used for statistical or clinical inference.",
+    },
+    limitations: simList(
+      ["合成数据，不代表任何真实个体的脑电", "仅 20 秒、8 通道，无法体现空间分布", "不用于任何诊断或筛查"],
+      ["Synthetic data; it does not represent any real individual's EEG", "Only 20 s and 8 channels, so no spatial distribution", "Not for diagnosis or screening"],
+    ),
+    what_this_data_cannot_tell: simList(
+      ["真实被试的脑电特征", "任何疾病的迹象", "人群层面的规律"],
+      ["Real participants' EEG characteristics", "Any sign of disease", "Population-level patterns"],
+    ),
+    recordRef: "sim-alpha-8ch",
+    source: simText("NeuroAccess EEG 模拟器（合成教学数据）", "NeuroAccess EEG Simulator (synthetic teaching data)"),
+    dataKind: "simulated",
+    sourceType: "simulated",
+    dataset: simText("NeuroAccess EEG Simulator（合成）", "NeuroAccess EEG Simulator (synthetic)"),
+    citation: simText("由 NeuroAccess EEG 模拟器生成，非真实被试记录", "Generated by the NeuroAccess EEG simulator; not a real participant recording"),
+    license: "CC0 1.0 (synthetic data, no rights reserved)",
+    recordingType: simText("合成示例：8 通道 · 250 Hz · 20 秒", "Synthetic example: 8 channels · 250 Hz · 20 s"),
+    tags: ["alpha", "resting", "simulated", "beginner", "rhythm"],
+    readTime: "3 分钟",
+  },
+  {
+    id: "c10",
+    title: { zh: "常见伪迹示例", en: "Common Artifacts Example" },
+    categoryKey: "patterns",
+    difficultyKey: "beginner",
+    description: {
+      zh: "合成教学片段：8 通道、250 Hz、20 秒，混入眨眼、肌电与工频干扰。用来练习「分辨伪迹与脑电」——伪迹通常幅度更大、形态更尖锐，或呈现固定频率。",
+      en: "A synthetic teaching segment: 8 channels, 250 Hz, 20 s, mixed with eye-blink, muscle and power-line interference. Use it to practise telling artifacts apart from brain activity — artifacts are usually larger, sharper, or fixed in frequency.",
+    },
+    details: {
+      zh: "1. 数据类型：合成（NeuroAccess EEG 模拟器）\n2. 实测相对频段功率：δ 45.1%、θ 15.3%、α 11.5%、β 19.0%、γ 9.1%\n3. 信号质量 71.0 / 100，检出 1 类伪迹\n4. 低频占比高 + 幅度突增，是眼动/运动伪迹的典型表现",
+      en: "1. Data type: synthetic (NeuroAccess EEG simulator)\n2. Measured relative band power: δ 45.1%, θ 15.3%, α 11.5%, β 19.0%, γ 9.1%\n3. Signal quality 71.0 / 100, 1 artifact type detected\n4. High low-frequency share plus sudden amplitude jumps is typical of movement/eye artifacts",
+    },
+    signal_quality: 70.96,
+    learning_readability_score: 90.0,
+    beginner_explanation: {
+      zh: "这段波形看起来更「乱」：有的地方突然很高很尖（多是眨眼或肌肉抖动），有的地方像密集的毛刺（多是工频干扰）。这些都不是大脑发出的信号，需要先排除再判读。",
+      en: "This trace looks messier: some moments jump very high and sharp (usually blinks or muscle twitches), others carry dense fuzz (usually power-line noise). None of that is brain activity — it has to be ruled out before reading the EEG.",
+    },
+    student_explanation: {
+      zh: "δ 45.1% 明显偏高，配合幅度突增提示低频伪迹主导；β 19.0% 偏高在真实记录里常见于肌电。识别伪迹是判读前的必要一步。",
+      en: "Delta at 45.1% is high, and together with sudden amplitude jumps it points to low-frequency artifact dominance; elevated beta (19.0%) often reflects muscle activity in real recordings. Artifact identification is a required step before interpretation.",
+    },
+    research_explanation: {
+      zh: "合成信号，8 通道 250 Hz、20 s。相对频段功率 δ 45.1 / θ 15.3 / α 11.5 / β 19.0 / γ 9.1（%），质量 71.0，检出伪迹 1 类。局限：合成伪迹幅度经过放大以便观察，真实记录中伪迹常与脑电深度混合。",
+      en: "Synthetic signal, 8 channels at 250 Hz, 20 s. Relative band power δ 45.1 / θ 15.3 / α 11.5 / β 19.0 / γ 9.1 (%), quality 71.0, one artifact type detected. Limitation: synthetic artifact amplitudes are exaggerated for visibility; in real recordings artifacts mix deeply with EEG.",
+    },
+    limitations: simList(
+      ["合成数据，伪迹形态经过简化", "未覆盖所有伪迹类型（如电极脱落、出汗）", "不能据此判断真实记录的伪迹程度"],
+      ["Synthetic data with simplified artifact morphology", "Does not cover every artifact type (e.g. electrode pop, sweat)", "Cannot indicate how noisy a real recording is"],
+    ),
+    what_this_data_cannot_tell: simList(
+      ["真实记录里伪迹的实际比例", "任何疾病信息", "某段信号是否「可以忽略」"],
+      ["The real proportion of artifacts in actual recordings", "Any disease information", "Whether a given segment can be safely ignored"],
+    ),
+    recordRef: "sim-artifacts-8ch",
+    source: simText("NeuroAccess EEG 模拟器（合成教学数据）", "NeuroAccess EEG Simulator (synthetic teaching data)"),
+    dataKind: "simulated",
+    sourceType: "simulated",
+    dataset: simText("NeuroAccess EEG Simulator（合成）", "NeuroAccess EEG Simulator (synthetic)"),
+    citation: simText("由 NeuroAccess EEG 模拟器生成，非真实被试记录", "Generated by the NeuroAccess EEG simulator; not a real participant recording"),
+    license: "CC0 1.0 (synthetic data, no rights reserved)",
+    recordingType: simText("合成示例：8 通道 · 250 Hz · 20 秒", "Synthetic example: 8 channels · 250 Hz · 20 s"),
+    tags: ["artifacts", "simulated", "beginner", "eye-blink", "line-noise"],
+    readTime: "3 分钟",
+  },
 ];
 const difficultyColor: Record<string, string> = {
   beginner: "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-400 dark:border-green-800",
@@ -818,7 +914,6 @@ export default function CasesPage() {
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<string>("default");
 
   const categories = ["all", ...Array.from(new Set(cases.map((c) => c.categoryKey)))];
   const difficulties = ["all", "beginner", "intermediate", "advanced"];
@@ -830,23 +925,25 @@ export default function CasesPage() {
       if (selectedTag && !c.tags.includes(selectedTag)) return false;
       const q = search.toLowerCase();
       if (q) {
-        const title = (c.title[lang] || c.title.en || c.title.zh || "").toLowerCase();
-        const desc = (c.description[lang] || c.description.en || c.description.zh || "").toLowerCase();
-        const tags = c.tags.join(" ").toLowerCase();
-        if (!title.includes(q) && !desc.includes(q) && !tags.includes(q)) return false;
+        // 2026-11-10：跨语言检索 —— 中文界面搜英文、英文界面搜中文都要能命中；
+        // 同时覆盖详情/三档解释/来源说明，不再只看标题与描述。
+        const parts: string[] = [];
+        for (const l of ["zh", "en"] as const) {
+          const t1 = c.title[l]; const d1 = c.description[l]; const dt1 = c.details[l];
+          const b1 = c.beginner_explanation[l]; const s1 = c.student_explanation[l]; const r1 = c.research_explanation[l];
+          if (t1) parts.push(t1); if (d1) parts.push(d1); if (dt1) parts.push(dt1);
+          if (b1) parts.push(b1); if (s1) parts.push(s1); if (r1) parts.push(r1);
+          if (c.source?.[l]) parts.push(c.source[l]);
+        }
+        parts.push(...(c.tags || []));
+        const haystack = parts.join(" ").toLowerCase();
+        if (!haystack.includes(q)) return false;
       }
       return true;
     });
 
-    // 排序
-    if (sortBy === "quality") result.sort((a, b) => b.signal_quality - a.signal_quality);
-    if (sortBy === "difficulty") {
-      const order = { beginner: 0, intermediate: 1, advanced: 2 };
-      result.sort((a, b) => (order[a.difficultyKey] || 0) - (order[b.difficultyKey] || 0));
-    }
-
     return result;
-  }, [cases, selectedCategory, selectedDifficulty, search, selectedTag, sortBy, lang]);
+  }, [cases, selectedCategory, selectedDifficulty, search, selectedTag, lang]);
 
   const toggle = (id: string) => {
     setExpandedId(expandedId === id ? null : id);
@@ -917,20 +1014,6 @@ export default function CasesPage() {
                 </button>
               ))}
             </div>
-
-            {/* 排序 */}
-            <div className="flex items-center gap-1.5 ml-auto">
-              <ArrowUpDown className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="inline-flex min-h-[44px] items-center text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[var(--color-text)] focus:outline-none"
-              >
-                <option value="default">{t("casesSortDefault")}</option>
-                <option value="quality">{t("quality")}</option>
-                <option value="difficulty">{t("casesSortDifficulty")}</option>
-              </select>
-            </div>
           </div>
 
           {/* 标签筛选（仅在有选中标签时显示清除按钮） */}
@@ -947,6 +1030,9 @@ export default function CasesPage() {
 
         {/* 案例列表 */}
         <div className="space-y-4">
+          {filtered.length === 0 && (
+            <div className="py-16 text-center text-sm text-[var(--color-text-secondary)]">{t("casesEmptyState")}</div>
+          )}
           {filtered.map((c, i) => {
             const isExpanded = expandedId === c.id;
             const title = c.title[lang] || c.title.en || c.title.zh || "";

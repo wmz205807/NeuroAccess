@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import FloatingField from "@/components/ui/FloatingField";
+import CodeInput from "@/components/ui/CodeInput";
+import AvatarEditor from "@/components/ui/AvatarEditor";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useLang } from "@/lib/language-context";
 import { t } from "@/lib/translations";
 import { getDisplayInitial } from "@/lib/display-initial";
-import { ArrowLeft, User, Key, Mail, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, User, Key, Mail, AlertTriangle, Eye, EyeOff, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 
@@ -48,6 +51,11 @@ export default function AccountPage() {
     c === "blue" ? "#3B82F6" : (c && AVATAR_COLORS.includes(c) ? c : AVATAR_COLORS[0]);
   const [editUsername, setEditUsername] = useState(user?.username || "");
   const [editAvatarUrl, setEditAvatarUrl] = useState(normalizeAvatarColor(user?.avatar_color));
+  // 2026-11-05（用户要求）：除预设颜色外支持自定义头像图片
+  const [avatarImage, setAvatarImage] = useState(user?.avatar_url || "");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarEditFile, setAvatarEditFile] = useState<File | null>(null);
+  const avatarFileRef = useRef<HTMLInputElement | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
@@ -91,8 +99,49 @@ export default function AccountPage() {
     if (user) {
       setEditUsername(user.username || "");
       setEditAvatarUrl(normalizeAvatarColor(user?.avatar_color));
+      setAvatarImage(user?.avatar_url || "");
     }
   }, [user]);
+
+  // 选图后先进编辑器（拖动/缩放），确认再上传
+  const handleAvatarPick = (file?: File | null) => {
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
+      setEditError("只支持 PNG / JPG / WEBP 图片");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setEditError("图片不能超过 2MB");
+      return;
+    }
+    setEditError("");
+    setAvatarEditFile(file);
+  };
+
+  // 上传编辑后的头像（后端只收 png/jpg/webp，≤2MB）
+  const uploadAvatarBlob = async (blob: Blob) => {
+    setAvatarUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", new File([blob], "avatar.png", { type: "image/png" }));
+      const resp = await fetch(`${API_BASE}/api/account/avatar`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const r = await resp.json();
+      if (r.success && r.avatar_url) {
+        // 只更新预览；真正入库要等用户点下面的「保存」
+        setAvatarImage(r.avatar_url);
+        setAvatarEditFile(null);
+      } else {
+        setEditError(r.error || "上传失败");
+      }
+    } catch (e: any) {
+      setEditError(e.message || "上传失败");
+    }
+    setAvatarUploading(false);
+  };
 
   const submitProfileUpdate = async () => {
     setEditError("");
@@ -105,12 +154,12 @@ export default function AccountPage() {
     }
     setEditLoading(true);
     try {
-      const result = await updateProfile({ username: editUsername, avatar_color: editAvatarUrl });
+      const result = await updateProfile({ username: editUsername, avatar_color: editAvatarUrl, avatar_url: avatarImage });
       if (result.success) {
         setEditSuccess(t(lang, "profileUpdated"));
         // 更新本地用户状态
         if (user) {
-          const updated = { ...user, username: editUsername, avatar_color: editAvatarUrl };
+          const updated = { ...user, username: editUsername, avatar_color: editAvatarUrl, avatar_url: avatarImage };
           updateUser(updated);
         }
       } else {
@@ -147,9 +196,13 @@ export default function AccountPage() {
     try {
       const result = await sendVerificationCode({});
       if (result.success) {
-        setPwCountdown(60);
-        if (emailSentOk(result.emailSent)) setPwSuccess(t(lang, "codeSentToEmail"));
-        else setPwError(t(lang, "sendCodeFailed"));
+        // 2026-11-06：只有邮件真的发出去才进倒计时；失败时不要锁住按钮（否则用户要白等 60 秒）
+        if (emailSentOk(result.emailSent)) {
+          setPwCountdown(60);
+          setPwSuccess(t(lang, "codeSentToEmail"));
+        } else {
+          setPwError(t(lang, "sendCodeFailed"));
+        }
       } else {
         setPwError(result.error || t(lang, "sendCodeFailed"));
       }
@@ -213,9 +266,12 @@ export default function AccountPage() {
     try {
       const result = await sendOldEmailCode();
       if (result.success) {
-        setOldEmailCountdown(60);
-        if (emailSentOk(result.emailSent)) setEmailSuccess(t(lang, "codeSentToEmail"));
-        else setEmailError(t(lang, "sendCodeFailed"));
+        if (emailSentOk(result.emailSent)) {
+          setOldEmailCountdown(60);
+          setEmailSuccess(t(lang, "codeSentToEmail"));
+        } else {
+          setEmailError(t(lang, "sendCodeFailed"));
+        }
       } else {
         setEmailError(result.error || t(lang, "sendCodeFailed"));
       }
@@ -284,9 +340,12 @@ export default function AccountPage() {
         result = { detail: t(lang, "sendCodeFailed") };
       }
       if (resp.ok && result.success) {
-        setEmailCountdown(60);
-        if (emailSentOk(result.email_sent)) setEmailSuccess(t(lang, "codeSentToEmail"));
-        else setEmailError(t(lang, "sendCodeFailed"));
+        if (emailSentOk(result.email_sent)) {
+          setEmailCountdown(60);
+          setEmailSuccess(t(lang, "codeSentToEmail"));
+        } else {
+          setEmailError(t(lang, "sendCodeFailed"));
+        }
       } else {
         setEmailError(result.detail || result.error || t(lang, "sendCodeFailed"));
       }
@@ -367,7 +426,7 @@ export default function AccountPage() {
       const result = await deleteAccount({ verification_code: deleteCode });
       if (result.success) {
         setDeleteSuccess(t(lang, "accountDeleted"));
-        setTimeout(() => { logout(); router.push("/"); }, 1500);
+        setTimeout(() => { logout(); router.push("/login"); }, 1500);
       } else {
         leavingRef.current = false;
         setDeleteError(result.error || t(lang, "failedToDeleteAccount"));
@@ -422,12 +481,37 @@ export default function AccountPage() {
           <div className="p-5 space-y-4">
             {/* 大号头像预览 */}
             <div className="flex justify-center mb-2">
-              <div
-                className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold border-4 border-[var(--color-border)]"
-                style={{ backgroundColor: editAvatarUrl || "#3B82F6" }}
+              <button
+                type="button"
+                onClick={async () => {
+                  if (avatarImage) {
+                    try {
+                      const resp = await fetch(avatarImage);
+                      const blob = await resp.blob();
+                      setAvatarEditFile(new File([blob], "avatar.png", { type: blob.type || "image/png" }));
+                    } catch {
+                      avatarFileRef.current?.click();
+                    }
+                  } else {
+                    avatarFileRef.current?.click();
+                  }
+                }}
+                title="点击编辑头像"
+                aria-label="点击编辑头像"
+                className="rounded-full transition-transform hover:scale-105 focus-visible:outline-none"
               >
-                {getDisplayInitial(editUsername || user?.username || "?")}
+              <div
+                className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold border-4 border-[var(--color-border)] overflow-hidden"
+                style={{ backgroundColor: avatarImage ? "#0b111c" : (editAvatarUrl || "#3B82F6") }}
+              >
+                {avatarImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatarImage} alt="avatar" className="w-full h-full object-cover" />
+                ) : (
+                  getDisplayInitial(editUsername || user?.username || "?")
+                )}
               </div>
+              </button>
             </div>
             {/* 头像颜色选择 */}
             <div>
@@ -438,39 +522,59 @@ export default function AccountPage() {
                 {AVATAR_COLORS.map((color) => (
                   <button
                     key={color}
-                    onClick={() => setEditAvatarUrl(color)}
+                    onClick={() => { setEditAvatarUrl(color); setAvatarImage(""); }}
                     className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold transition-all shrink-0 ${
-                      editAvatarUrl === color ? "ring-2 ring-offset-2 ring-[var(--color-primary)] scale-125" : "hover:scale-110"
+                      editAvatarUrl === color && !avatarImage ? "ring-2 ring-offset-2 ring-[var(--color-primary)] scale-125" : "hover:scale-110"
                     }`}
                     style={{ backgroundColor: color }}
                   >
                     {getDisplayInitial(editUsername || user?.username || "?")}
                   </button>
                 ))}
+                {/* 2026-11-05：自定义头像图片上传 */}
+                <button
+                  type="button"
+                  onClick={() => avatarFileRef.current?.click()}
+                  disabled={avatarUploading}
+                  title="上传自定义头像"
+                  aria-label="上传自定义头像"
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 border-2 border-dashed transition-all ${
+                    avatarImage ? "border-[var(--color-primary)] text-[var(--color-primary)] scale-110" : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+                  } disabled:opacity-50`}
+                >
+                  {avatarUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  )}
+                </button>
+                <input
+                  ref={avatarFileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => { handleAvatarPick(e.target.files?.[0] || null); e.currentTarget.value = ""; }}
+                />
               </div>
             </div>
             {/* 用户名 */}
-            <div>
-              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">
-                {t(lang, "username")}
-              </label>
-              <input
-                type="text"
-                value={editUsername}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  // 实时同步到 state 并显示错误（不阻塞输入）
-                  setEditUsername(v);
-                  const result = validateUsername(v);
-                  if (!result.ok) {
-                    setEditError(result.error);
-                  } else {
-                    setEditError("");
-                  }
-                }}
-                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-              />
-            </div>
+            <FloatingField
+              id="acct-username"
+              label={t(lang, "username")}
+              value={editUsername}
+              onChange={(v) => {
+                // 实时同步到 state 并显示错误（不阻塞输入）
+                setEditUsername(v);
+                const result = validateUsername(v);
+                if (!result.ok) {
+                  setEditError(result.error);
+                } else {
+                  setEditError("");
+                }
+              }}
+              autoComplete="username"
+              tone="subtle"
+            />
             {/* 保存按钮 */}
             <button
               onClick={submitProfileUpdate}
@@ -478,7 +582,7 @@ export default function AccountPage() {
               className="w-full rounded-xl bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-[var(--color-bg)] transition-colors hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {editLoading ? (
-                <span className="inline-block animate-spin">⏳</span>
+                <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
                 <>{t(lang, "save")}</>
               )}
@@ -498,76 +602,64 @@ export default function AccountPage() {
           </div>
           <div className="p-5 space-y-4">
             {/* 验证码 */}
-            <div>
-              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">
-                {t(lang, "verificationCode")}
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={pwCode}
-                  onChange={(e) => setPwCode(e.target.value)}
-                  placeholder={t(lang, "enterCode")}
-                  className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                />
+            <div className="flex gap-2">
+                <div className="flex-1">
+                  <CodeInput
+                    value={pwCode}
+                    onChange={setPwCode}
+                    label={t(lang, "verificationCode")}
+                    tone="subtle"
+                  />
+                </div>
                 <button
                   onClick={sendPwCode}
                   disabled={pwLoading || pwCountdown > 0}
-                  className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors disabled:opacity-40 whitespace-nowrap"
+                  className="self-stretch rounded-xl border border-[var(--color-border)] px-4 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors disabled:opacity-40 whitespace-nowrap"
                 >
                   {pwCountdown > 0 ? `${pwCountdown}s` : (t(lang, "sendCode"))}
                 </button>
               </div>
-            </div>
             {/* 新密码 */}
-            <div>
-              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">
-                {t(lang, "newPassword")}
-              </label>
-              <div className="relative">
-                <input
-                  type={pwShowNew ? "text" : "password"}
-                  value={pwNew}
-                  onChange={(e) => setPwNew(e.target.value)}
-                  className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 pr-10 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setPwShowNew(!pwShowNew)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
-                >
+            <FloatingField
+              id="acct-pw-new"
+              label={t(lang, "newPassword")}
+              type={pwShowNew ? "text" : "password"}
+              value={pwNew}
+              onChange={setPwNew}
+              autoComplete="new-password"
+              tone="subtle"
+              right={
+                <button type="button" onClick={() => setPwShowNew(!pwShowNew)}
+                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[var(--color-text-secondary)]"
+                  aria-label={pwShowNew ? "Hide password" : "Show password"}>
                   {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
-              </div>
-            </div>
+              }
+            />
             {/* 确认密码 */}
-            <div>
-              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">
-                {t(lang, "confirmPassword")}
-              </label>
-              <div className="relative">
-                <input
-                  type={pwShowConfirm ? "text" : "password"}
-                  value={pwConfirm}
-                  onChange={(e) => setPwConfirm(e.target.value)}
-                  className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 pr-10 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setPwShowConfirm(!pwShowConfirm)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]"
-                >
+            <FloatingField
+              id="acct-pw-confirm"
+              label={t(lang, "confirmPassword")}
+              type={pwShowConfirm ? "text" : "password"}
+              value={pwConfirm}
+              onChange={setPwConfirm}
+              autoComplete="new-password"
+              tone="subtle"
+              right={
+                <button type="button" onClick={() => setPwShowConfirm(!pwShowConfirm)}
+                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[var(--color-text-secondary)]"
+                  aria-label={pwShowConfirm ? "Hide password" : "Show password"}>
                   {pwShowConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
-              </div>
-            </div>
+              }
+            />
             {/* 修改按钮 */}
             <button
               onClick={submitPwChange}
               disabled={pwLoading}
               className="w-full rounded-xl bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-[var(--color-bg)] transition-colors hover:opacity-90 disabled:opacity-40"
             >
-              {pwLoading ? <span className="inline-block animate-spin">⏳</span> : (t(lang, "changePassword"))}
+              {pwLoading ? <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" /> : (t(lang, "changePassword"))}
             </button>
             {pwError && <p className="text-xs text-red-500 dark:text-red-400">{pwError}</p>}
             {pwSuccess && <p className="text-xs text-emerald-500 dark:text-emerald-400">{pwSuccess}</p>}
@@ -596,11 +688,16 @@ export default function AccountPage() {
                   {oldEmailCountdown > 0 ? `${oldEmailCountdown}s` : (t(lang, "sendCodeToCurrentEmail"))}
                 </button>
                 <div className="flex gap-2">
-                  <input type="text" value={oldEmailCode} onChange={(e) => setOldEmailCode(e.target.value)}
-                    placeholder={t(lang, "enterCode")}
-                    className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]" />
+                  <div className="flex-1">
+                    <CodeInput
+                      value={oldEmailCode}
+                      onChange={setOldEmailCode}
+                      label={t(lang, "enterCode")}
+                      tone="subtle"
+                    />
+                  </div>
                   <button onClick={handleVerifyOldEmail} disabled={oldEmailLoading || !oldEmailCode}
-                    className="rounded-xl bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-[var(--color-bg)] hover:opacity-90 disabled:opacity-40">
+                    className="self-stretch rounded-xl bg-[var(--color-primary)] px-4 text-xs font-semibold text-[var(--color-bg)] hover:opacity-90 disabled:opacity-40">
                     {oldEmailLoading ? "..." : t(lang, "verify")}
                   </button>
                 </div>
@@ -614,28 +711,33 @@ export default function AccountPage() {
                   <p className="text-xs text-emerald-700 dark:text-emerald-300">{t(lang, "oldEmailVerified")}</p>
                 </div>
                 {/* 新邮箱 */}
-                <div>
-                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">{t(lang, "newEmail")}</label>
-                  <div className="flex gap-2">
-                    <input type="email" value={emailNew} onChange={(e) => setEmailNew(e.target.value)}
-                      placeholder={t(lang, "emailPlaceholder") || "name@example.com"}
-                      className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]" />
+                <div className="flex gap-2">
+                    <FloatingField
+                      id="acct-new-email"
+                      label={t(lang, "newEmail")}
+                      type="email"
+                      value={emailNew}
+                      onChange={setEmailNew}
+                      autoComplete="email"
+                      inputMode="email"
+                      tone="subtle"
+                      className="flex-1"
+                    />
                     <button onClick={sendEmailCode} disabled={emailLoading || emailCountdown > 0}
-                      className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors disabled:opacity-40 whitespace-nowrap">
+                      className="self-stretch rounded-xl border border-[var(--color-border)] px-4 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors disabled:opacity-40 whitespace-nowrap">
                       {emailCountdown > 0 ? `${emailCountdown}s` : (t(lang, "sendCode"))}
                     </button>
                   </div>
-                </div>
                 {/* 验证码 */}
-                <div>
-                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">{t(lang, "verificationCode")}</label>
-                  <input type="text" value={emailCode} onChange={(e) => setEmailCode(e.target.value)}
-                    placeholder={t(lang, "enterCode")}
-                    className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]" />
-                </div>
+                <CodeInput
+                  value={emailCode}
+                  onChange={setEmailCode}
+                  label={t(lang, "verificationCode")}
+                  tone="subtle"
+                />
                 <button onClick={submitEmailChange} disabled={emailLoading}
                   className="w-full rounded-xl bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-[var(--color-bg)] transition-colors hover:opacity-90 disabled:opacity-40">
-                  {emailLoading ? <span className="inline-block animate-spin">⏳</span> : (t(lang, "confirmChange"))}
+                  {emailLoading ? <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" /> : (t(lang, "confirmChange"))}
                 </button>
               </>
             )}
@@ -668,25 +770,19 @@ export default function AccountPage() {
               {t(lang, "sendCodeToCurrentEmail")}
             </button>
             {/* 验证码 */}
-            <div>
-              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">
-                {t(lang, "verificationCode")}
-              </label>
-              <input
-                type="text"
-                value={deleteCode}
-                onChange={(e) => setDeleteCode(e.target.value)}
-                placeholder={t(lang, "enterCode")}
-                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-              />
-            </div>
+            <CodeInput
+              value={deleteCode}
+              onChange={setDeleteCode}
+              label={t(lang, "verificationCode")}
+              tone="subtle"
+            />
             {/* 注销按钮 */}
             <button
               onClick={submitDeleteAccount}
               disabled={deleteLoading}
               className="w-full rounded-xl bg-red-600 dark:bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 dark:hover:bg-red-800 disabled:opacity-40"
             >
-              {deleteLoading ? <span className="inline-block animate-spin">⏳</span> : (t(lang, "confirmDeleteAccount"))}
+              {deleteLoading ? <Loader2 className="mx-auto h-4 w-4 animate-spin" aria-hidden="true" /> : (t(lang, "confirmDeleteAccount"))}
             </button>
             {deleteError && <p className="text-xs text-red-500 dark:text-red-400">{deleteError}</p>}
             {deleteSuccess && <p className="text-xs text-emerald-500 dark:text-emerald-400">{deleteSuccess}</p>}
@@ -696,13 +792,23 @@ export default function AccountPage() {
         {/* 退出登录 */}
         <div className="pt-4">
           <button
-            onClick={() => { leavingRef.current = true; logout(); router.push("/"); }}
+            onClick={() => { leavingRef.current = true; logout(); router.push("/login"); }}
             className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors"
           >
             {t(lang, "logout")}
           </button>
         </div>
       </div>
+
+      {/* 头像编辑器：选图后先调整位置/缩放，确认再上传 */}
+      {avatarEditFile && (
+        <AvatarEditor
+          file={avatarEditFile}
+          busy={avatarUploading}
+          onCancel={() => setAvatarEditFile(null)}
+          onConfirm={uploadAvatarBlob}
+        />
+      )}
     </motion.div>
   );
 }

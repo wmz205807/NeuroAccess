@@ -464,7 +464,7 @@ def generate_verification_code(user_id: Optional[int] = None, email: Optional[st
     """
     code = f"{_secrets.randbelow(900000) + 100000}"
     code_hash = pwd_context.hash(code)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
     conn = get_db()
     try:
         # Invalidate any existing unused codes for this user/email + purpose
