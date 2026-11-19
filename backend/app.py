@@ -2181,6 +2181,21 @@ def auth_change_password(credentials: HTTPAuthorizationCredentials = Depends(sec
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录凭证无效")
     user_id = int(payload["sub"])
+    # 2026-11-19 用户要求：新密码不能与当前密码相同。
+    # 放在「校验验证码」之前：这样被拒绝时不会消耗验证码，用户可直接改一个新密码再提交。
+    # 注意：get_user_by_id 不返回 password_hash，必须直接查库，否则判断会被静默跳过。
+    try:
+        _conn = get_db()
+        _row = _conn.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+        _conn.close()
+        _hash = _row["password_hash"] if _row else None
+        if _hash:
+            from auth import verify_password as _vp
+            if _vp(new_password, _hash):
+                return {"success": False, "error": "新密码不能与当前密码相同"}
+    except Exception as _e:
+        print("[change-password] same-password check failed:", _e)
+
     if not verify_verification_code(user_id=user_id, code=verification_code, purpose="password_change"):
         return {"success": False, "error": "验证码无效或已过期"}
     try:
@@ -2248,6 +2263,9 @@ def auth_send_email_change_code(credentials: HTTPAuthorizationCredentials = Depe
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if not re.match(r"^[^@]+@[^@]+\.[^@]+$", new_email):
         return {"success": False, "error": "邮箱格式无效"}
+    # 2026-11-19 用户要求：新邮箱不能与当前邮箱相同（不区分大小写）
+    if user.get("email") and new_email.strip().lower() == str(user["email"]).strip().lower():
+        return {"success": False, "error": "新邮箱不能与当前邮箱相同"}
     conn = get_db()
     try:
         existing = conn.execute("SELECT id FROM users WHERE email=?", (new_email,)).fetchone()
@@ -2295,6 +2313,9 @@ def auth_confirm_email_change(credentials: HTTPAuthorizationCredentials = Depend
     user_id = int(payload["sub"])
     if not verify_verification_code(user_id=user_id, code=verification_code, purpose=f"email_change:{new_email}"):
         return {"success": False, "error": "验证码无效或已过期"}
+    _cur = get_user_by_id(user_id)
+    if _cur and _cur.get("email") and new_email.strip().lower() == str(_cur["email"]).strip().lower():
+        return {"success": False, "error": "新邮箱不能与当前邮箱相同"}
     updated = update_email(user_id, new_email)
     if updated:
         updated_user = get_user_by_id(user_id)
@@ -2982,6 +3003,220 @@ def waveform_data(rid: str = "", page: int = 0, ch0: int = 0, nch: int = 0):
             "totalChannels": len(names),
             "samplingRate": wp.get("sampling_rate"),
         }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# =================================================================
+# EEG 窗口数据端点（2026-11-18）
+# 目的：给前端 Canvas 波形查看器提供**真实采样值**（不平滑、不插值）。
+# 来源：
+#   - case_id=c1..c10 → 磁盘真实 EDF（cases/），MNE 按原生采样率读取；
+#   - rid=<报告ID>     → 报告已存的 waveform_preview（真实采样值的降采样副本）。
+# 传输：float32 小端二进制（[nch][npts]），元信息放在 base64 的 X-EEG-Meta 头。
+# =================================================================
+_EEG_WIN_CACHE: Dict[str, Dict[str, Any]] = {}
+_EEG_WIN_ORDER: List[str] = []
+_EEG_WIN_BUDGET = 160 * 1024 * 1024
+_EEG_WIN_LOCK = threading.Lock()
+
+
+def _eeg_win_cache_put(key: str, obj: Dict[str, Any]) -> None:
+    with _EEG_WIN_LOCK:
+        if key not in _EEG_WIN_CACHE:
+            _EEG_WIN_ORDER.append(key)
+        _EEG_WIN_CACHE[key] = obj
+        total = sum(v.get("nbytes", 0) for v in _EEG_WIN_CACHE.values())
+        while total > _EEG_WIN_BUDGET and _EEG_WIN_ORDER:
+            old = _EEG_WIN_ORDER.pop(0)
+            if old == key:
+                continue
+            drop = _EEG_WIN_CACHE.pop(old, None)
+            if drop:
+                total -= drop.get("nbytes", 0)
+
+
+def _eeg_load_case(case_id: str) -> Optional[Dict[str, Any]]:
+    """读取真实 EDF（磁盘文件），返回 µV 矩阵，按案例缓存。"""
+    meta = CASE_REGISTRY.get(case_id)
+    if not meta:
+        return None
+    key = "case:" + case_id
+    with _EEG_WIN_LOCK:
+        hit = _EEG_WIN_CACHE.get(key)
+    if hit is not None:
+        return hit
+    path = os.path.join(CASES_DIR, meta["file"])
+    if not os.path.exists(path):
+        return None
+    import mne
+    raw = mne.io.read_raw_edf(path, preload=True, verbose="ERROR")
+    data = raw.get_data() * 1e6  # V → µV（EDF 原始物理量）
+    obj = {
+        "data": data.astype(np.float32),
+        "channels": list(raw.ch_names),
+        "fs": float(raw.info["sfreq"]),
+        "t0": 0.0,
+        "source": "edf",
+        "nbytes": int(data.nbytes),
+    }
+    _eeg_win_cache_put(key, obj)
+    return obj
+
+
+def _eeg_load_report(rid: str) -> Optional[Dict[str, Any]]:
+    """读取报告保存的 waveform_preview（真实采样值的降采样副本）。"""
+    key = "report:" + rid
+    with _EEG_WIN_LOCK:
+        hit = _EEG_WIN_CACHE.get(key)
+    if hit is not None:
+        return hit
+    from auth import get_db
+    conn = get_db()
+    row = conn.execute("SELECT data FROM reports WHERE id=?", (rid,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = json.loads(row[0])
+    wp = (d.get("analysis") or {}).get("waveform_preview") or {}
+    chs = wp.get("channels") or {}
+    times = wp.get("times") or []
+    names = list(chs.keys())
+    if not names or len(times) < 2:
+        return None
+    mat = np.array([chs[c] for c in names], dtype=np.float32)
+    # 2026-11-18 修复：预览数据可能是降采样过的（例如声明 250Hz，实际 150Hz）。
+    # 时间轴必须用**真实点间距**换算，否则窗口长度与时间刻度都会错位。
+    declared = float(wp.get("sampling_rate") or 0)
+    eff = 1.0 / max(times[1] - times[0], 1e-9) if len(times) > 1 else declared
+    fs = eff if eff > 0 else (declared or 128.0)
+    obj = {
+        "data": mat,
+        "channels": names,
+        "fs": fs,
+        "t0": float(times[0]),
+        "source": "preview" if abs(fs - declared) < 0.5 else "preview-downsampled",
+        "native_fs": declared or fs,
+        "nbytes": int(mat.nbytes),
+    }
+    _eeg_win_cache_put(key, obj)
+    return obj
+
+
+@app.get("/api/eeg/info")
+def eeg_info(rid: str = "", case_id: str = "",
+             credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """返回通道清单与时长（不含采样点），供前端规划按需取通道。"""
+    try:
+        if not rid and not case_id:
+            return {"success": False, "error": "Missing rid or case_id"}
+        if case_id:
+            src = _eeg_load_case(case_id)
+        else:
+            uid = _report_user_id(credentials)
+            from auth import get_db
+            conn = get_db()
+            own = conn.execute("SELECT 1 FROM reports WHERE id=? AND user_id=?", (rid, uid)).fetchone()
+            conn.close()
+            if not own:
+                return {"success": False, "error": "Report not found"}
+            src = _eeg_load_report(rid)
+        if src is None:
+            return {"success": False, "error": "No waveform data"}
+        total = src["data"].shape[1] / src["fs"] if src["fs"] > 0 else 0
+        return {
+            "success": True,
+            "channels": src["channels"],
+            "fs": src["fs"],
+            "totalSeconds": total,
+            "source": src["source"],
+            "unit": "uV",
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/eeg/window")
+def eeg_window(rid: str = "", case_id: str = "", start: float = 0.0, dur: float = 10.0,
+               ch0: int = 0, nch: int = 0, chs: str = "",
+               credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """返回指定时间窗的真实采样值（float32 二进制），供 Canvas 渲染。"""
+    try:
+        import base64
+        if not rid and not case_id:
+            return {"success": False, "error": "Missing rid or case_id"}
+
+        src = None
+        if case_id:
+            src = _eeg_load_case(case_id)
+        else:
+            uid = _report_user_id(credentials)
+            from auth import get_db
+            conn = get_db()
+            own = conn.execute("SELECT 1 FROM reports WHERE id=? AND user_id=?", (rid, uid)).fetchone()
+            conn.close()
+            if not own:
+                return {"success": False, "error": "Report not found"}
+            src = _eeg_load_report(rid)
+        if src is None:
+            return {"success": False, "error": "No waveform data"}
+
+        data = src["data"]
+        names = src["channels"]
+        fs = src["fs"]
+        t0 = src["t0"]
+        total_n = int(data.shape[1])
+        total_sec = total_n / fs if fs > 0 else 0.0
+
+        dur = max(0.05, min(float(dur or 10.0), 120.0))
+        start = max(0.0, min(float(start or 0.0), max(total_sec - 0.05, 0.0)))
+        i0 = int(round(start * fs))
+        i1 = int(round(min(start + dur, total_sec) * fs))
+        i0 = max(0, min(i0, total_n - 2))
+        i1 = max(i0 + 2, min(i1, total_n))
+
+        idx = None
+        if chs:
+            try:
+                idx = [int(x) for x in chs.split(",") if x.strip() != ""]
+                idx = [i for i in idx if 0 <= i < len(names)]
+            except Exception:
+                idx = None
+        if idx:
+            c0 = idx[0]
+            sel = [names[i] for i in idx]
+            sub = np.ascontiguousarray(data[idx, i0:i1], dtype=np.float32)
+        else:
+            c0 = max(0, min(int(ch0 or 0), len(names) - 1))
+            want = int(nch or 0) or len(names)
+            sel = names[c0:c0 + want] or names
+            sub = np.ascontiguousarray(data[c0:c0 + len(sel), i0:i1], dtype=np.float32)
+
+        meta = {
+            "channels": sel,
+            "allChannels": names,
+            "ch0": c0,
+            "fs": fs,
+            "start": t0 + i0 / fs,
+            "dur": (i1 - i0) / fs,
+            "npts": int(sub.shape[1]),
+            "totalSeconds": total_sec,
+            "source": src["source"],
+            "nativeFs": src.get("native_fs", fs),
+            "declaredFs": src.get("native_fs", fs),
+            "effectiveFs": fs,
+            "unit": "uV",
+        }
+        hdr = base64.b64encode(json.dumps(meta, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        return Response(
+            content=sub.tobytes(order="C"),
+            media_type="application/octet-stream",
+            headers={
+                "X-EEG-Meta": hdr,
+                "Cache-Control": "no-store",
+                "Access-Control-Expose-Headers": "X-EEG-Meta",
+            },
+        )
     except Exception as e:
         return {"success": False, "error": str(e)}
 

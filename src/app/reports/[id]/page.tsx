@@ -10,7 +10,7 @@ import { useLang } from "@/lib/language-context";
 import ReportDetail from "@/components/ReportDetail";
 import { downloadCSV } from "@/lib/csv-export";
 
-import ReportEEGChart from "@/components/ReportEEGChart";
+import EegCanvasViewer from "@/components/eeg/EegCanvasViewer";
 
 type Tab = "analysis" | "eeg";
 
@@ -51,7 +51,15 @@ export default function ReportDetailPage() {
       router.push("/login");
       return;
     }
-    const found = getReportById(id);
+    // 2026-11-19：本地缓存可能因体积过大或 JSON 损坏而抛异常，
+    // 一旦抛出会让整个加载流程中断、页面永远停在 loading。这里单独兜住。
+    let found: StoredReport | undefined;
+    try {
+      found = getReportById(id) as StoredReport | undefined;
+    } catch (e) {
+      console.warn("[report] local cache unreadable, falling back to server", e);
+      found = undefined;
+    }
 
     // 本地波形状态：有波形且为新格式（wpSchema===2）才是真实波形；旧格式(min/max成对)是假波形，需从服务器取新波形。
     const localWp = (found?.analysis as any)?.waveform_preview;
@@ -68,7 +76,12 @@ export default function ReportDetailPage() {
     // 注意：本地完全找不到报告时不能直接显示"没有报告"——本地缓存可能因存储配额被压缩掉，
     // 必须从服务器拉取；拉不到才真的是没有。
     const loadServerReport = async () => {
-      const serverReport = await fetchServerReport(id).catch(() => null);
+      let serverReport: StoredReport | null = null;
+      try {
+        serverReport = (await fetchServerReport(id)) as StoredReport | null;
+      } catch {
+        serverReport = null;
+      }
       if (serverReport?.analysis) {
         // 2026-10-18：原来只要「本地有新格式波形」就绝不覆盖 ⇒ 永远用 localStorage 里那份。
         // 但 localStorage 存的是 /api/analyze 的**降采样**预览（63 通道长文件只剩 ~21 点/秒），
@@ -85,16 +98,17 @@ export default function ReportDetailPage() {
           setReport(serverReport as StoredReport);
         }
         try { addReport(serverReport as StoredReport); } catch {}
-      } else if (!found && !cancelled) {
-        // 本地与服务器都没有 → 才是真的不存在
-        setReport(null);
+      } else if (!cancelled) {
+        // 本地与服务器都拿不到 → 结束 loading（有本地摘要就用摘要，否则显示「未找到」）
+        setReport(found ?? null);
       } else if (!cancelled && !localHasWaveform) {
         // 服务器取不到完整报告但本地有摘要 → 用摘要兜底（至少能看文字分析，波形显示不可用）
         setReport(found);
       }
       // 仅静默写回 AI 解释缓存到本地（下次打开即用），不触发任何重渲染
-      const aid = (serverReport?.analysis || found?.analysis)?.analysis_id;
-      if (aid) {
+      const base = (serverReport || found) as StoredReport | undefined;
+      const aid = base?.analysis?.analysis_id;
+      if (aid && base) {
         fetch(`/api/analysis/explanations/${aid}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -102,8 +116,8 @@ export default function ReportDetailPage() {
           .then((data) => {
             if (data.success && data.explanations) {
               const enriched = {
-                ...(serverReport || found),
-                analysis: { ...(serverReport || found).analysis, explanations: data.explanations },
+                ...base,
+                analysis: { ...base.analysis, explanations: data.explanations },
               } as StoredReport;
               try {
                 addReport(enriched);
@@ -224,7 +238,7 @@ export default function ReportDetailPage() {
         {activeTab === "eeg" && (
           <div>
             <ReportErrorBoundary fallback={t("noBandWaveform")}>
-              <ReportEEGChart key={report.id + "eeg"} reportFileName={report.fileName} analysis={report.analysis} id={report.id} />
+              <EegCanvasViewer key={report.id + "eeg"} rid={report.id} fileName={report.fileName} height={460} />
             </ReportErrorBoundary>
           </div>
         )}

@@ -6,10 +6,13 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useLang } from "@/lib/language-context";
 import Link from "next/link";
+import FloatingField from "@/components/ui/FloatingField";
+import CodeInput from "@/components/ui/CodeInput";
 import { translations } from "@/lib/translations";
 import AuthSettingsBar from "@/components/AuthSettingsBar";
 import TurnstileModal from "@/components/TurnstileModal";
-import { Loader2 } from "lucide-react";
+import { Loader2, HelpCircle } from "lucide-react";
+import DownloadDataButton from "@/components/DownloadDataButton";
 
 interface RegisterFormProps {
   lang: string;
@@ -149,56 +152,112 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
   };
 
   return (
-    <motion.div className="min-h-full flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}>
+    <motion.div className="min-h-full lg:min-h-[calc(100dvh-9rem)] flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}>
       <div className="absolute top-4 right-4 z-20"><AuthSettingsBar /></div>
-      <div className="w-full max-w-md p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto">
-        <div className="mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs leading-relaxed text-[var(--color-text)]">
+      {/* 2026-11-05：桌面端双栏（与登录页一致）—— 左品牌/介绍，右注册表单；移动端单列 */}
+      <div className="w-full max-w-6xl mx-auto px-4 py-10 sm:px-6 lg:px-10 lg:py-14 flex items-center justify-center gap-10 lg:gap-16">
+
+        <aside className="hidden lg:flex flex-1 flex-col justify-center max-w-md">
+          <img src="/neuroaccess-logo.png" alt="NeuroAccess" width={72} height={72} className="w-[72px] h-[72px] rounded-2xl object-cover mb-6" />
+          <h1 className="text-4xl font-bold tracking-tight text-[var(--color-text)]">NeuroAccess</h1>
+          <p className="mt-5 text-sm leading-7 text-[var(--color-text-secondary)]">{tf("siteIntro", "")}</p>
+          <p className="mt-4 inline-flex w-fit items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-primary)]">
+            {tf("freePlatform", "")}
+          </p>
+
+          {/* 2026-11-19 用户要求：与登录页一致，把「没有 EEG 文件？」提示卡放在左侧介绍栏下方 */}
+          <div className="mt-7 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+            <div className="flex items-start gap-2.5">
+              <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-[var(--color-text)]">
+                  {tf("noEegFileTitle", "No EEG file?")}
+                </div>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-secondary)]">
+                  {tf("noEegFileBody", "Don't have an EEG file? Don't worry — sample files are included. Download one?")}
+                </p>
+                <div className="mt-2.5">
+                  <DownloadDataButton />
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+      <div className="w-full max-w-md lg:w-[440px] lg:max-w-none p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto lg:mx-0 shrink-0">
+        <div className="lg:hidden mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs leading-relaxed text-[var(--color-text)]">
           {tf("siteIntro", "")}
           <span className="mt-2 block font-semibold text-blue-600 dark:text-blue-400 text-[11px]">{tf("freePlatform", "")}</span>
         </div>
         <div className="text-center mb-8">
-          <img src="/neuroaccess-logo.png" alt="NeuroAccess" width={48} height={48} className="w-12 h-12 rounded-xl mx-auto mb-3 object-cover" />
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">NeuroAccess</h1>
+          <img src="/neuroaccess-logo.png" alt="NeuroAccess" width={48} height={48} className="w-12 h-12 rounded-xl mx-auto mb-3 object-cover lg:hidden" />
+          <h1 className="text-2xl font-bold text-[var(--color-text)] lg:hidden">NeuroAccess</h1>
           <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{tf("register", "Register")}</p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("username", "Username")}</label>
-            <input type="text" value={username}
-              onChange={(e) => {
-                const v = e.target.value;
-                setUsername(v); // 始终同步 state，避免显示值与提交值不一致
-                if (v === "") { setError(tf("usernameRequired", "Please enter a username")); return; }
-                const firstChar = Array.from(v)[0]||"";
-                const isLetterStart = /^\p{L}/u.test(firstChar);
-                if (!isLetterStart) { setError(tf("usernameMustStartWithLetter", "Username must start with a letter")); return; }
-                if (/[!@#$%^&*()+\=\[\]{}|\\;:'"`/<>?~.,。]/.test(v)) { setError(tf("usernameNoSpecialChars", "Username cannot contain special characters")); return; }
-                if (/\s{2,}/.test(v)) { setError(tf("noConsecutiveSpaces", "Username cannot have consecutive spaces")); return; }
-                const vlen = Array.from(v).filter(ch => !/[\u0300-\u036f\u0483-\u0489]/.test(ch)).length;
-                if (vlen >= 2 && vlen <= 20) { setError(""); }
-                else if (vlen === 1) { setError(tf("usernameTooShort", "Username must be at least 2 characters")); }
-                else if (vlen > 20) { setError(tf("usernameTooLong", "Username must be at most 20 characters")); }
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-              placeholder={tf("username", "Username")} required minLength={2} maxLength={20} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("email", "Email")}</label>
-            <div className="flex gap-2">
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="flex-1 px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                placeholder={tf("email", "Email")} required />
-              <button type="button" onClick={handleSendCode} disabled={!email || countdown > 0 || sending}
-                className="px-4 py-2.5 rounded-xl bg-[var(--color-primary)] text-[var(--color-bg)] text-sm font-medium hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap">
-                {countdown > 0 ? `${countdown}s` : tf("sendCode", "Get code")}
-              </button>
+        {/* 小屏（lg 以下）保留一份：左侧介绍栏在小屏是隐藏的 */}
+        <div className="lg:hidden mt-5 mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3.5">
+          <div className="flex items-start gap-2.5">
+            <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-[var(--color-text)]">
+                {tf("noEegFileTitle", "No EEG file?")}
+              </div>
+              <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-secondary)]">
+                {tf("noEegFileBody", "Don't have an EEG file? Don't worry — sample files are included. Download one?")}
+              </p>
+              <div className="mt-2.5">
+                <DownloadDataButton />
+              </div>
             </div>
           </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <FloatingField
+            id="reg-username"
+            label={tf("username", "Username")}
+            value={username}
+            onChange={(v) => {
+              setUsername(v); // 始终同步 state，避免显示值与提交值不一致
+              if (v === "") { setError(tf("usernameRequired", "Please enter a username")); return; }
+              const firstChar = Array.from(v)[0]||"";
+              const isLetterStart = /^\p{L}/u.test(firstChar);
+              if (!isLetterStart) { setError(tf("usernameMustStartWithLetter", "Username must start with a letter")); return; }
+              if (/[!@#$%^&*()+\=\[\]{}|\\;:'"`/<>?~.,。]/.test(v)) { setError(tf("usernameNoSpecialChars", "Username cannot contain special characters")); return; }
+              if (/\s{2,}/.test(v)) { setError(tf("noConsecutiveSpaces", "Username cannot have consecutive spaces")); return; }
+              const vlen = Array.from(v).filter(ch => !/[\u0300-\u036f\u0483-\u0489]/.test(ch)).length;
+              if (vlen >= 2 && vlen <= 20) { setError(""); }
+              else if (vlen === 1) { setError(tf("usernameTooShort", "Username must be at least 2 characters")); }
+              else if (vlen > 20) { setError(tf("usernameTooLong", "Username must be at most 20 characters")); }
+            }}
+            autoComplete="username"
+            required
+            minLength={2}
+            maxLength={20}
+          />
+          <div className="flex gap-2">
+            <FloatingField
+              id="reg-email"
+              label={tf("email", "Email")}
+              type="email"
+              value={email}
+              onChange={setEmail}
+              autoComplete="email"
+              inputMode="email"
+              className="flex-1"
+              required
+            />
+            <button type="button" onClick={handleSendCode} disabled={!email || countdown > 0 || sending}
+              className="self-stretch px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-bg)] text-sm font-medium hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap">
+              {countdown > 0 ? `${countdown}s` : tf("sendCode", "Get code")}
+            </button>
+          </div>
           <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("verificationCode", "Verification code")}</label>
-            <input type="text" value={code} onChange={(e) => setCode(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-              placeholder={tf("verificationCode", "Verification code")} required maxLength={6} />
+            <CodeInput
+              value={code}
+              onChange={setCode}
+              label={tf("verificationCode", "Verification code")}
+            />
             {process.env.NODE_ENV === "development" && devCode && (
               <p className="mt-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-lg px-3 py-2">
                 {tf("emailNotConfigured", "Email service not configured, dev code")}: <code className="font-mono font-bold text-base">{devCode}</code>
@@ -209,29 +268,34 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
               </p>
             )}
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("password", "Password")}</label>
-            <div className="relative">
-              <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 pr-10 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                placeholder={tf("password", "Password")} required minLength={6} />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0} aria-label={showPassword ? "Hide password" : "Show password"}>
+          <FloatingField
+            id="reg-password"
+            label={tf("password", "Password")}
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={setPassword}
+            autoComplete="new-password"
+            required
+            minLength={6}
+            right={
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0} aria-label={showPassword ? "Hide password" : "Show password"}>
                 {showPassword ? (
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg>
                 ) : (
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                 )}
               </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("confirmPassword", "Confirm Password")}</label>
-            <div className="relative">
-              <input type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 pr-10 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                placeholder={tf("confirmPassword", "Confirm Password")} required />
-            </div>
-          </div>
+            }
+          />
+          <FloatingField
+            id="reg-confirm"
+            label={tf("confirmPassword", "Confirm Password")}
+            type={showPassword ? "text" : "password"}
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+            required
+          />
           {error && (<div role="alert" aria-live="assertive" className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 dark:text-red-400 text-sm">{error}</div>)}
           <button type="submit" disabled={submitting} aria-busy={submitting} className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-bg)] font-semibold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity">
             {submitting ? (
@@ -243,8 +307,9 @@ export default function RegisterForm({ lang }: RegisterFormProps) {
         </form>
         <div className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
           {tf("hasAccount", "Already have an account?")}{" "}
-          <Link href="/login" className="font-medium underline underline-offset-2 hover:opacity-70 transition-opacity">{tf("login", "Login")}</Link>
+          <Link href="/login" className="inline-block py-3 -my-3 font-medium underline underline-offset-2 hover:opacity-70 transition-opacity">{tf("login", "Login")}</Link>
         </div>
+      </div>
       </div>
       <TurnstileModal siteKey={turnstileSiteKey} open={turnstileOpen} onVerify={handleTurnstileVerify} onClose={() => { setTurnstileOpen(false); pendingRegRef.current = null; }} />
     </motion.div>

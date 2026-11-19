@@ -271,7 +271,7 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     <span className="text-sm text-[var(--color-text-secondary)]">
                       {t("version")}
                     </span>
-                    <span className="text-sm font-mono text-[var(--color-text)]">v2.0</span>
+                    <span className="text-sm font-mono text-[var(--color-text)]">v2.5</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-[var(--color-text-secondary)]">

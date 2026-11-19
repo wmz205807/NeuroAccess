@@ -4,6 +4,7 @@ import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import TopNav from "@/components/TopNav";
 import { DisclaimerModal, PostLoginModals } from "@/components/LazyModals";
+import ChunkReloadGuard from "@/components/ChunkReloadGuard";
 import RoutePrefetcher from "@/components/RoutePrefetcher";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotificationToast from "@/components/NotificationToast";
@@ -184,7 +185,31 @@ export default async function RootLayout({
               // 2026-10-18：游客「退出网站 = 退出登录」⇒ 下次进来必须重新勾选
               // 免责声明 / 隐私政策 / 服务条款。这里在 React 挂载**之前**跑，
               // 清掉同意标记（na-last-hide 由 analysis-context 自己消费，这里不删）。
-              __html: `(function(){try{var h=Number(sessionStorage.getItem("na-last-hide")||0);if(h&&Date.now()-h>30000){localStorage.removeItem("neuroaccess-disclaimer-accepted");sessionStorage.removeItem("na-guest-consent");}}catch(e){}})()`,
+              __html: `(function(){try{var h=Number(sessionStorage.getItem("na-last-hide")||0);if(h&&Date.now()-h>30000){localStorage.removeItem("neuroaccess-disclaimer-accepted");sessionStorage.removeItem("na-guest-consent");sessionStorage.removeItem("na-guest-verified");sessionStorage.removeItem("na-guest-entry");sessionStorage.removeItem("na-consent-privacy");sessionStorage.removeItem("na-consent-terms");sessionStorage.removeItem("na-consent-disclaimer");}}catch(e){}})()`,
+            }}
+          />
+          <script
+            dangerouslySetInnerHTML={{
+              // 2026-11-05（用户要求）：游客「退出后再进入」必须**立刻**回登录页，
+              // 不能先渲染主页面再被弹走。
+              // 之所以会"呆一会儿"：游客身份 cookie 是会话级 cookie，浏览器恢复会话
+              // 或同浏览器新标签时会残留，服务端中间件据此放行 ⇒ 主页面先渲染；
+              // 而 sessionStorage（na-guest-entry）随标签页关闭已消失，前端守卫才把他踢走。
+              // 这里在 React 挂载前、首屏绘制前判断：有 cookie 但没有本次进入标记 ⇒
+              // 清 cookie 并 replace 到登录页（页面内容不会被看到）。
+              __html: `(function(){try{
+var p=location.pathname;
+var skip=p.indexOf("/login")===0||p.indexOf("/register")===0||p.indexOf("/privacy")===0||p.indexOf("/terms")===0||p.indexOf("/disclaimer")===0;
+if(skip)return;
+var hasToken=!!localStorage.getItem("neuroaccess-token");
+var entry=sessionStorage.getItem("na-guest-entry")==="1";
+var ck=document.cookie||"";
+var hasGuestCookie=ck.indexOf("na-guest-entry=1")>=0;
+if(!hasToken&&!entry&&hasGuestCookie){
+  document.cookie="na-guest-entry=; path=/; max-age=0; SameSite=Lax";
+  location.replace("/login");
+}
+}catch(e){}})()`,
             }}
           />
           <script
@@ -204,6 +229,7 @@ export default async function RootLayout({
               <IntroProvider>
               <AnalysisProvider>
               <DisclaimerModal />
+              <ChunkReloadGuard />
               <PostLoginModals />
               <NotificationToast />
               <RoutePrefetcher />

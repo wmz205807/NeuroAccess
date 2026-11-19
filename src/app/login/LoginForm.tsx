@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useLang } from "@/lib/language-context";
 import Link from "next/link";
+import FloatingField from "@/components/ui/FloatingField";
+import CodeInput from "@/components/ui/CodeInput";
 import { translations } from "@/lib/translations";
 import AuthSettingsBar from "@/components/AuthSettingsBar";
 import TurnstileModal from "@/components/TurnstileModal";
@@ -214,7 +216,7 @@ export default function LoginForm({ lang }: LoginFormProps) {
 
   return (
     <motion.div
-      className="min-h-full flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16"
+      className="min-h-full lg:min-h-[calc(100dvh-9rem)] flex items-center justify-center bg-[var(--color-bg)] relative z-10 pb-16"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.32, ease: [0.22, 0.8, 0.22, 1] }}
@@ -223,46 +225,83 @@ export default function LoginForm({ lang }: LoginFormProps) {
         <AuthSettingsBar />
       </div>
 
+      {/* 2026-11-05（用户要求）：桌面端改双栏 —— 左品牌/介绍，右登录表单；移动端仍是单列。 */}
+      <div className="w-full max-w-6xl mx-auto px-4 py-10 sm:px-6 lg:px-10 lg:py-14 flex items-center justify-center gap-10 lg:gap-16">
+
+        {/* 左栏：桌面端专用品牌区 */}
+        <aside className="hidden lg:flex flex-1 flex-col justify-center max-w-md">
+          <img src="/neuroaccess-logo.png" alt="NeuroAccess" width={72} height={72} className="w-[72px] h-[72px] rounded-2xl object-cover mb-6" />
+          <h1 className="text-4xl font-bold tracking-tight text-[var(--color-text)]">NeuroAccess</h1>
+          <p className="mt-5 text-sm leading-7 text-[var(--color-text-secondary)]">{tf("siteIntro", "")}</p>
+          <p className="mt-4 inline-flex w-fit items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-primary)]">
+            {tf("freePlatform", "")}
+          </p>
+
+          {/* 2026-11-19 用户要求：把「没有 EEG 文件？」提示卡挪到左边介绍栏下方 */}
+          <div className="mt-7 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+            <div className="flex items-start gap-2.5">
+              <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-[var(--color-text)]">
+                  {tf("noEegFileTitle", "No EEG file?")}
+                </div>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-secondary)]">
+                  {tf("noEegFileBody", "Don't have an EEG file? Don't worry — sample files are included. Download one?")}
+                </p>
+                <div className="mt-2.5">
+                  <DownloadDataButton />
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
       {/* 2026-10-18：小屏上卡片原来会被右上角「设置」浮标压住（浮标是 absolute top-4）。
           这里给卡片留出顶部空间；sm 以上布局不变。 */}
-      <div className="w-full max-w-md mt-12 sm:mt-0 p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto">
-        <div className="mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs leading-relaxed text-[var(--color-text)]">
+      <div className="w-full max-w-md lg:w-[440px] lg:max-w-none mt-12 sm:mt-0 p-5 sm:p-8 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] mx-3 sm:mx-auto lg:mx-0 shrink-0">
+        {/* 桌面双栏时这段介绍已在左侧显示，避免重复 */}
+        <div className="lg:hidden mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-cyan-50/80 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs leading-relaxed text-[var(--color-text)]">
           {tf("siteIntro", "")}
           <span className="mt-2 block font-semibold text-blue-600 dark:text-blue-400 text-[11px]">{tf("freePlatform", "")}</span>
         </div>
 
         <div className="text-center mb-8">
-          <img src="/neuroaccess-logo.png" alt="NeuroAccess" width={48} height={48} className="w-12 h-12 rounded-xl mx-auto mb-3 object-cover" />
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">NeuroAccess</h1>
+          <img src="/neuroaccess-logo.png" alt="NeuroAccess" width={48} height={48} className="w-12 h-12 rounded-xl mx-auto mb-3 object-cover lg:hidden" />
+          <h1 className="text-2xl font-bold text-[var(--color-text)] lg:hidden">NeuroAccess</h1>
           <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{tf("login", "Log in")}</p>
         </div>
 
         {!useCode ? (
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <FloatingField
+              id="login-account"
+              label={`${tf("username", "Username")} / ${tf("email", "Email")}`}
+              value={usernameOrEmail}
+              onChange={setUsernameOrEmail}
+              autoComplete="username"
+              required
+            />
             <div>
-              <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">
-                {tf("username", "Username")} / {tf("email", "Email")}
-              </label>
-              <input type="text" value={usernameOrEmail} onChange={(e) => setUsernameOrEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                placeholder={tf("username", "Username")} required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("password", "Password")}</label>
-              <div className="relative">
-                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 pr-10 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                  placeholder={tf("password", "Password")} required />
-                <button type="button" onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0}
-                  aria-label={showPassword ? "Hide password" : "Show password"}>
-                  {showPassword ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg>
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                  )}
-                </button>
-              </div>
+              <FloatingField
+                id="login-password"
+                label={tf("password", "Password")}
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={setPassword}
+                autoComplete="current-password"
+                required
+                right={
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors" tabIndex={0}
+                    aria-label={showPassword ? "Hide password" : "Show password"}>
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    )}
+                  </button>
+                }
+              />
                 <button type="button" onClick={switchToCodeMode} className="mt-1.5 inline-flex min-h-[44px] items-center text-xs text-[var(--color-primary)] hover:opacity-80 transition-opacity">
                   {tf("useCodeLogin", "Log in with code")}
                 </button>
@@ -285,18 +324,26 @@ export default function LoginForm({ lang }: LoginFormProps) {
           </form>
         ) : (
           <form onSubmit={handleCodeSubmit} className="space-y-4">
+            <FloatingField
+              id="login-email"
+              label={tf("email", "Email")}
+              type="email"
+              value={codeEmail}
+              onChange={setCodeEmail}
+              autoComplete="email"
+              inputMode="email"
+              required
+            />
             <div>
-              <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("email", "Email")}</label>
-              <input type="email" value={codeEmail} onChange={(e) => setCodeEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                placeholder={tf("email", "Email")} required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1.5 text-[var(--color-text)]">{tf("verificationCode", "Verification Code")}</label>
-              <div className="flex gap-2">
-                <input type="text" value={code} onChange={(e) => setCode(e.target.value)}
-                  className="flex-1 px-3.5 py-2.5 rounded-xl border transition-colors bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-primary)]/30"
-                  placeholder={tf("verificationCode", "Verification Code")} required />
+              <label className="block text-xs text-[var(--color-text-secondary)] mb-1.5">{tf("verificationCode", "Verification Code")}</label>
+              <div className="flex gap-2 items-center">
+                <div className="flex-1">
+                  <CodeInput
+                    value={code}
+                    onChange={setCode}
+                    label={tf("verificationCode", "Verification Code")}
+                  />
+                </div>
                 <button type="button" onClick={handleSendCode} disabled={codeCountdown > 0 || codeSending}
                   className="shrink-0 px-3 py-2.5 rounded-xl bg-[var(--color-primary)]/10 text-[var(--color-primary)] text-xs font-medium hover:bg-[var(--color-primary)]/20 disabled:opacity-40 transition-colors whitespace-nowrap">
                   {codeCountdown > 0 ? `${codeCountdown}s` : tf("getCode", "Get Code")}
@@ -332,19 +379,8 @@ export default function LoginForm({ lang }: LoginFormProps) {
           </form>
         )}
 
-        <div className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
-          {tf("noAccount", "No account?")}{" "}
-          <Link href="/register" className="font-medium underline underline-offset-2 hover:opacity-70 transition-opacity">
-            {tf("register", "Register")}
-          </Link>
-        </div>
-        <p className="mt-3 text-center text-xs text-[var(--color-text-secondary)]">
-          {tf("loginHint", "You will be redirected after login.")}
-        </p>
-
-        {/* 2026-10-18：用户要求 —— 在登录页告诉「普通人没有 EEG 文件怎么办」，
-            并给出直接去下载测试文件的入口（复用既有的下载弹窗，不新增页面）。 */}
-        <div className="mt-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3.5">
+        {/* 小屏（lg 以下）保留一份：左侧介绍栏在小屏是隐藏的 */}
+        <div className="lg:hidden mt-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3.5">
           <div className="flex items-start gap-2.5">
             <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
             <div className="min-w-0 flex-1">
@@ -352,7 +388,7 @@ export default function LoginForm({ lang }: LoginFormProps) {
                 {tf("noEegFileTitle", "No EEG file?")}
               </div>
               <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-secondary)]">
-                {tf("noEegFileBody", "Don't have an EEG file? Don't worry — sample files are included. Download one?")}
+                {tf("noEegFileBody", "Don't have an EEG file? / 没有 EEG 文件？")}
               </p>
               <div className="mt-2.5">
                 <DownloadDataButton />
@@ -361,11 +397,34 @@ export default function LoginForm({ lang }: LoginFormProps) {
           </div>
         </div>
 
+        <div className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
+          {tf("noAccount", "No account?")}{" "}
+          <Link href="/register" className="inline-block py-3 -my-3 font-medium underline underline-offset-2 hover:opacity-70 transition-opacity">
+            {tf("register", "Register")}
+          </Link>
+        </div>
+        <p className="mt-3 text-center text-xs text-[var(--color-text-secondary)]">
+          {tf("loginHint", "You will be redirected after login.")}
+        </p>
+
         {/* 游客模式：不登录直接进入，布局与登录态一致 */}
         <div className="mt-6 pt-5 border-t border-[var(--color-border)]">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => {
+              // 2026-10-25：点「以游客身份浏览」= 一次新的进入
+              // ⇒ 清掉上一次进入的验证/勾选记录（刷新不重来，但重新进入必重来），
+              //   并标记本次已选择游客身份（否则会被守卫送回登录页）。
+              try {
+                sessionStorage.removeItem("na-guest-verified");
+                sessionStorage.removeItem("na-guest-consent");
+                sessionStorage.setItem("na-guest-entry", "1");
+              } catch {}
+              // 服务端中间件据此放行游客页面；会话级 cookie（无 max-age）⇒ 关浏览器即失效
+              try { document.cookie = "na-guest-entry=1; path=/; SameSite=Lax"; } catch {}
+              // 整页跳转：确保请求携带游客 cookie（SPA 预取可能在 cookie 生效前被判未登录）
+              window.location.href = "/";
+            }}
             className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] text-sm font-medium text-[var(--color-text)] hover:border-[var(--color-text-secondary)] transition-colors"
           >
             {tf("continueAsGuest", "Continue as guest")}
@@ -375,7 +434,8 @@ export default function LoginForm({ lang }: LoginFormProps) {
           </p>
         </div>
         </div>
-        <TurnstileModal siteKey={turnstileSiteKey} open={turnstileOpen} onVerify={handleTurnstileVerify} onClose={() => { setTurnstileOpen(false); pendingLoginRef.current = null; }} />
+      </div>
+      <TurnstileModal siteKey={turnstileSiteKey} open={turnstileOpen} onVerify={handleTurnstileVerify} onClose={() => { setTurnstileOpen(false); pendingLoginRef.current = null; }} />
       </motion.div>
   );
 }
