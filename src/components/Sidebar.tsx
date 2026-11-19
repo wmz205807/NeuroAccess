@@ -51,6 +51,10 @@ export default function Sidebar() {
     }));
   }, [lang, user]);
 
+  // 2026-10-27（用户要求）：登录页不显示左侧边栏
+  // 2026-11-05：注册页同样不显示（与登录页保持一致的双栏布局）
+  if (pathname === "/login" || pathname === "/register") return null;
+
   return (
     <aside
       className={`bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col transition-[width] duration-300 hidden lg:flex ${

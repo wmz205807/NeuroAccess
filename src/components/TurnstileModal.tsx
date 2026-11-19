@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/lib/language-context";
 
 interface Props {
@@ -17,12 +17,19 @@ export default function TurnstileModal({ siteKey, open, onVerify, onClose }: Pro
   const cbName = useRef(`__turnstile_cb_${Date.now()}`);
   const expName = useRef(`__turnstile_exp_${Date.now()}`);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 2026-10-25：验证卡住时必须给用户明确反馈 + 重试入口（之前是无限转圈，用户以为"没反应")
+  const [errMsg, setErrMsg] = useState("");
+  const [slow, setSlow] = useState(false);
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!open || !siteKey) return;
 
     const doVerify = (token: string) => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      if (slowTimer.current) { clearTimeout(slowTimer.current); slowTimer.current = null; }
+      setErrMsg("");
+      setSlow(false);
       onVerify(token);
     };
     // token 过期/失效：重置控件并清空隐藏输入，提示用户重新验证。
@@ -33,6 +40,8 @@ export default function TurnstileModal({ siteKey, open, onVerify, onClose }: Pro
       }
       const resp = containerRef.current?.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement | null;
       if (resp) { try { resp.value = ""; } catch {} }
+      setSlow(false);
+      setErrMsg("验证未能完成，请点击下方重试");
     };
 
     (window as any)[cbName.current] = doVerify;
@@ -62,6 +71,12 @@ export default function TurnstileModal({ siteKey, open, onVerify, onClose }: Pro
       } catch {}
     };
 
+    setErrMsg("");
+    setSlow(false);
+    // 20 秒拿不到 token 就提示（不算失败，仍可继续等待，但用户知道发生了什么）
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = setTimeout(() => setSlow(true), 20000);
+
     if (!(window as any).turnstile) {
       if (!document.querySelector('script[src*="challenges.cloudflare.com/turnstile"]')) {
         const s = document.createElement("script");
@@ -78,6 +93,7 @@ export default function TurnstileModal({ siteKey, open, onVerify, onClose }: Pro
     }
 
     return () => {
+      if (slowTimer.current) { clearTimeout(slowTimer.current); slowTimer.current = null; }
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       if (widgetId.current && (window as any).turnstile) {
         try { (window as any).turnstile.remove(widgetId.current); } catch {}
@@ -98,6 +114,24 @@ export default function TurnstileModal({ siteKey, open, onVerify, onClose }: Pro
         </div>
         <h3 className="text-lg font-semibold text-[var(--color-text)] mb-4">{t("humanVerification")}</h3>
         <div ref={containerRef} className="flex justify-center" />
+        {errMsg && <p className="mt-3 text-xs text-red-500">{errMsg}</p>}
+        {!errMsg && slow && <p className="mt-3 text-xs text-amber-500">网络较慢，验证还没完成……可点击重试</p>}
+        {(errMsg || slow) && (
+          <button
+            type="button"
+            onClick={() => {
+              setErrMsg(""); setSlow(false);
+              if (widgetId.current && (window as any).turnstile) {
+                try { (window as any).turnstile.reset(widgetId.current); } catch {}
+              }
+              if (slowTimer.current) clearTimeout(slowTimer.current);
+              slowTimer.current = setTimeout(() => setSlow(true), 20000);
+            }}
+            className="mt-3 mx-auto block px-4 py-2 rounded-xl bg-[var(--color-primary)] text-sm font-medium text-[var(--color-surface)]"
+          >
+            重试
+          </button>
+        )}
         {onClose && (
           <button onClick={onClose} className="mt-4 px-4 py-2 rounded-xl text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-black/5 dark:hover:bg-white/5 transition-colors">{t("cancel")}</button>
         )}

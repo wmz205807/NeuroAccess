@@ -12,7 +12,7 @@ export default function DownloadDataButton({ fixed = false }: { fixed?: boolean 
   // 2026-10-18：按用户要求**恢复右下角悬浮形态（原来的位置）**。
   // 历史：10-15 曾把它从悬浮改到页脚（与免责声明同排）；用户明确要求改回原处。
   const btnClass = fixed
-    ? "fixed bottom-6 right-6 z-50 inline-flex items-center gap-2 rounded-xl bg-yellow-300 hover:bg-yellow-400 active:bg-yellow-500 text-yellow-800 font-semibold text-sm px-5 py-3 shadow-md transition-colors"
+    ? "fixed bottom-6 right-6 z-50 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-yellow-300 hover:bg-yellow-400 active:bg-yellow-500 text-yellow-800 font-semibold text-sm px-5 py-3 shadow-md transition-colors"
     : "inline-flex items-center gap-2 rounded-xl bg-yellow-300 hover:bg-yellow-400 active:bg-yellow-500 text-yellow-800 font-semibold text-sm px-4 py-2.5 shadow-sm transition-colors";
 
   return (

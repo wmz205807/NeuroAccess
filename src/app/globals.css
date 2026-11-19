@@ -411,3 +411,87 @@ html {
   opacity: 0;
   animation: skeletonFadeIn 0.18s ease-out 0.12s forwards;
 }
+
+/* ── 6) 浮动标签输入框（2026-11-05 用户要求：登录/注册/账户表单用浮动标签，不用占位符）
+   结构：<div class="ff"><input placeholder=" " /><label/></div>
+   label 默认在框内垂直居中；聚焦或有值时上浮到顶部变成小号标签。 */
+.ff { position: relative; }
+.ff > input,
+.ff > textarea {
+  display: block;
+  width: 100%;
+  padding: 1.45rem 0.875rem 0.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  line-height: 1.35;
+  outline: none;
+  transition: border-color .2s ease;
+}
+.ff > input:focus,
+.ff > textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.ff > label {
+  position: absolute;
+  left: 0.875rem;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: calc(100% - 1.75rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  transition: top .16s ease, font-size .16s ease, color .16s ease;
+}
+.ff > input:focus + label,
+.ff > input:not(:placeholder-shown) + label,
+.ff > textarea:focus + label,
+.ff > textarea:not(:placeholder-shown) + label {
+  top: 0.55rem;
+  transform: none;
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+.ff > input:focus + label,
+.ff > textarea:focus + label { color: var(--color-primary); }
+/* 右侧有按钮（显示密码 / 发送验证码）时留出空间 */
+.ff--subtle > input,
+.ff--subtle > textarea { background: var(--color-bg); }
+.ff--right > input { padding-right: 3.5rem; }
+.ff--right > label { max-width: calc(100% - 4rem); }
+
+/* ── 7) 六格验证码输入（2026-11-05 用户要求：独立格子，输入自动跳格，支持整段粘贴） */
+.code-boxes { display: flex; gap: .4rem; justify-content: flex-start; }
+.code-boxes > input {
+  /* 2026-11-05（用户要求）：正方格 —— 固定宽高，不再随容器拉伸 */
+  flex: 0 0 auto;
+  width: 2.8rem;
+  height: 2.8rem;
+  min-width: 0;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: .75rem;
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+.code-boxes > input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+.code-boxes.ff--subtle > input { background: var(--color-bg); }
+@media (max-width: 400px) {
+  .code-boxes { gap: .35rem; }
+  .code-boxes > input { width: 2.6rem; height: 2.6rem; font-size: 1rem; }
+}

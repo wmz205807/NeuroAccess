@@ -170,6 +170,8 @@ export function stepIndex(status: Status, stage?: string, uploadPct?: number): n
 
 /** 每一步的最小停留时长（毫秒）—— 让每次分析都看得清每一步。 */
 const MIN_DWELL_MS = 500;
+/** 展示节奏：每格 900ms ⇒ 约 4.5 秒走到最后一格（此后停在「AI 解释生成」等待真实完成）。 */
+const PACE_MS = 900;
 
 /**
  * 分析进行中的分步进度。只在 status 处于处理中时渲染有意义的内容。
@@ -211,6 +213,8 @@ export default function AnalysisSteps({
   const [shown, setShown] = useState(-1);
   const shownRef = useRef(-1);
   const lastRef = useRef(0);
+  // 计时起点（原声明在下方，前置到这里供展示节奏使用）
+  const startRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!running) {
@@ -223,10 +227,18 @@ export default function AnalysisSteps({
     if (shownRef.current < 0) {
       shownRef.current = 0;
       lastRef.current = Date.now();
+      if (startRef.current === null) startRef.current = Date.now();
       setShown(0);
     }
     const id = setInterval(() => {
-      if (shownRef.current >= cur) return;                     // 已追上真实进度，停下等它
+      // 2026-11-05（用户要求）：分析慢时不要一直停在第一步，而是尽早走到最后一步
+      // （"AI 解释生成中"）⇒ 展示步号允许按时间**超前**于真实阶段，上限仍是最后一格。
+      // 约束不变：组件何时消失完全由后端真实状态决定，绝不延长总时长；真实进度更快时
+      // 仍以真实为准（取两者较大值）。
+      const elapsedMs = startRef.current ? Date.now() - startRef.current : 0;
+      const paced = Math.min(5, Math.floor(elapsedMs / PACE_MS));
+      const target = Math.min(5, Math.max(cur, paced));
+      if (shownRef.current >= target) return;
       if (Date.now() - lastRef.current < MIN_DWELL_MS) return; // 本格还没停够
       shownRef.current += 1;
       lastRef.current = Date.now();
@@ -235,9 +247,7 @@ export default function AnalysisSteps({
     return () => clearInterval(id);
   }, [running, cur]);
 
-  // 真实已用时间：只读时钟，不做任何"按时间推进进度"的推断。
-  // 计时起点用 ref 记忆，running 翻成 false 时清空，下一轮分析重新计时。
-  const startRef = useRef<number | null>(null);
+  // 真实已用时间：只读时钟（计时起点 startRef 在上方已声明）。
   const [, force] = useState(0);
   // mounted 门闩：SSR 阶段不可能处于 running（要等用户点上传），
   // 但为彻底杜绝水合不一致，时间与百分比一律挂载后再显示。

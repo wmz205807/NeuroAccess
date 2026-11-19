@@ -22,7 +22,7 @@ interface AuthContextType {
   logout: () => void;
   loading: boolean;
   updateUser: (user: User) => void;
-  updateProfile: (data: { username?: string; avatar_color?: string }) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (data: { username?: string; avatar_color?: string; avatar_url?: string }) => Promise<{ success: boolean; error?: string }>;
   changePassword: (data: { verification_code: string; new_password: string }) => Promise<{ success: boolean; error?: string }>;
   sendVerificationCode: (data: { email?: string }) => Promise<{ success: boolean; error?: string; emailSent?: string }>;
   updateEmail: (data: { new_email: string; verification_code: string }) => Promise<{ success: boolean; error?: string }>;
@@ -438,7 +438,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateProfile = async (data: { username?: string; avatar_color?: string }): Promise<{ success: boolean; error?: string }> => {
+  const updateProfile = async (data: { username?: string; avatar_color?: string; avatar_url?: string }): Promise<{ success: boolean; error?: string }> => {
     if (!token) return { success: false, error: tf("notLoggedIn", "Not logged in") };
     try {
       const resp = await fetch(`${API_BASE}/api/auth/profile`, {
@@ -624,6 +624,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 注销时 NOT 清除同意记录，这样重新登录后不再显示弹窗
     // 只有用户主动删除账号才会清除
     clearAuthCookie();
+    // 2026-10-25（用户明确）：退出登录 = 直接回登录页，**不弹人机验证、不弹三协议**。
+    // ⇒ 清掉游客会话标记（下次以游客身份进入时要重新走「人机验证 + 三协议」）。
+    try {
+      sessionStorage.removeItem("na-guest-consent");
+      sessionStorage.removeItem("na-guest-verified");
+      sessionStorage.removeItem("na-guest-entry");
+      sessionStorage.removeItem("na-consent-privacy");
+      sessionStorage.removeItem("na-consent-terms");
+      sessionStorage.removeItem("na-consent-disclaimer");
+    } catch {}
+    try { document.cookie = "na-guest-entry=; path=/; max-age=0; SameSite=Lax"; } catch {}
   };
 
   const updateUser = (updatedUser: User) => {

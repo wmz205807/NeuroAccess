@@ -6,11 +6,9 @@ import type { NextRequest } from "next/server";
 // 所以不要放 "/"（会放行整站）。首页单独放在 publicExact 里精确匹配。
 const publicPaths = [
   "/login", "/register",
-  // 法律条款页（注册时需要查看，保持公开）
+  // 2026-10-27（用户要求）：未登录只放行「免责声明 / 隐私政策 / 服务条款」三个政策页，
+  // 其余页面（含教育内容）一律强制回登录页。游客想浏览必须先点「以游客身份浏览」。
   "/privacy", "/terms", "/disclaimer",
-  // 游客可访问的教育内容：无需注册即可了解与体验 NeuroAccess 的核心功能
-  // （Knowledge / Case Studies / Simulator）
-  "/guide", "/cases", "/eeg-simulator",
   // 静态资源与 API
   "/api/",
   "/_next/",
@@ -24,8 +22,14 @@ const publicPaths = [
   "/downloads/",
 ];
 
-// 精确匹配的公开路径（首页：游客可直接打开，登录后同一个路径渲染工作台）
-const publicExact = ["/"];
+// 2026-10-27：首页不再无条件公开（未登录会被拦回登录页）；
+// 只有「已选择游客身份」（见下方 guest cookie）才放行。
+const publicExact: string[] = [];
+
+// 游客身份 cookie（由登录页「以游客身份浏览」按钮写入，会话级，关浏览器即失效）
+const GUEST_COOKIE = "na-guest-entry";
+// 游客模式下允许浏览的页面（报告/账户仍需登录）
+const guestAllowed = ["/", "/guide", "/cases", "/eeg-simulator"];
 
 
 const SECRET = process.env.JWT_SECRET_KEY || "";
@@ -89,6 +93,9 @@ export async function middleware(request: NextRequest) {
     return pathname === p || pathname.startsWith(p + "/"); // 精确路径，防 /termsxxx 误放行
   });
   const tokenValid = token ? await isValidToken(token) : false;
+  // 游客身份：cookie 存在且当前路径在游客可用范围内 ⇒ 放行（人机验证/三协议由前端把关）
+  const guestEntry = request.cookies.get(GUEST_COOKIE)?.value === "1";
+  const guestPathOk = guestEntry && guestAllowed.some((p) => pathname === p || pathname.startsWith(p + "/"));
 
   // 已登录（token 有效）访问登录/注册页 → 重定向首页
   if (tokenValid && (pathname === "/login" || pathname === "/register")) {
@@ -97,8 +104,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // 公开路径直接放行
-  if (isPublic) {
+  // 公开路径 / 已验证游客身份可浏览的页面 → 直接放行
+  if (isPublic || guestPathOk) {
     const res = NextResponse.next();
     // 页面文档禁止强缓存，始终重新校验，部署新版本后刷新即可生效
     res.headers.set("Cache-Control", "no-cache");

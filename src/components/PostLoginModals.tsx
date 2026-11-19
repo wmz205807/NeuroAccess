@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useLang } from "@/lib/language-context";
 import { useAuth } from "@/lib/auth-context";
 import { Shield, ExternalLink, LogOut } from "lucide-react";
+import TurnstileModal from "@/components/TurnstileModal";
 
 export default function PostLoginModals() {
   const { t, lang } = useLang();
@@ -15,14 +16,31 @@ export default function PostLoginModals() {
 
   const [showTerms, setShowTerms] = useState(false);
   const [showUsernameSetup, setShowUsernameSetup] = useState(false);
+  // 2026-10-27：点了隐私政策/服务条款/免责声明会**同页跳转**，返回时把勾选状态恢复，
+  // 免得用户回来还要重新勾一遍（仅本次进入内有效，离开 >30s 由 layout 一并清理）。
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [agreedDisclaimer, setAgreedDisclaimer] = useState(false);
+  useEffect(() => {
+    try {
+      setAgreedPrivacy(sessionStorage.getItem("na-consent-privacy") === "1");
+      setAgreedTerms(sessionStorage.getItem("na-consent-terms") === "1");
+      setAgreedDisclaimer(sessionStorage.getItem("na-consent-disclaimer") === "1");
+    } catch {}
+  }, []);
   const [username, setUsername] = useState("");
   const [usernameError, setUsernameError] = useState("");
   const [usernameLoading, setUsernameLoading] = useState(false);
   const [termsLoading, setTermsLoading] = useState(false);
   const [termsError, setTermsError] = useState("");
+  // 2026-10-25：游客进站也要过 Turnstile，和登录/注册同一套控件
+  const [guestCaptchaOpen, setGuestCaptchaOpen] = useState(false);
+  // 2026-10-25（用户澄清）：**每次「进入」游客模式要验证+勾选，但刷新不算新进入**。
+  // ⇒ 用 sessionStorage 记住本次进入的结果（刷新不重复打扰）；
+  //   离开网站 >30s（layout 内联脚本清理）/ 退出登录（logout 清理）⇒ 下次算新进入。
+  const [guestVerified, setGuestVerified] = useState(false);
+  const [guestAccepted, setGuestAccepted] = useState(false);
+  const guestSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
   // Check on mount and when user/token changes
   useEffect(() => {
@@ -43,22 +61,53 @@ export default function PostLoginModals() {
       //   只在首页（= 真正以游客身份使用）才要求：
       //   · 登录页 / 注册页不弹（用户还没选择进入游客模式，不该提前拦）
       //   · 其他内容页（案例库 / 知识库 / 模拟器）不弹，可以先逛
-      // 用 sessionStorage 记本次访问内的同意（刷新不重复打扰）；
-      // 退站后由 layout.tsx 的内联脚本（依据 na-last-hide > 30s）清掉 ⇒ 下次必须重新勾选。
+      // 2026-10-25（用户两次强调）：**每次进入游客模式都要人机验证 + 勾这三项**。
+      //   ⇒ 只认内存态，组件挂载即视为一次新进入，刷新/重新打开都要重来。
       const onAuthPage = pathname.startsWith("/login") || pathname.startsWith("/register");
       const enterGuestMode = pathname === "/" || pathname === "/dashboard";
-      let guestOk = false;
-      try { guestOk = sessionStorage.getItem("na-guest-consent") === "true"; } catch {}
-      setShowTerms(enterGuestMode && !onAuthPage && !guestOk);
+      const guestGate = enterGuestMode && !onAuthPage;
+      // 2026-10-27（用户要求）：未登录时**除免责声明/隐私政策/服务条款之外的所有页面**
+      // 都必须回到登录页；只有点过「以游客身份浏览」（na-guest-entry）才放行浏览。
+      const policyPage =
+        pathname === "/disclaimer" || pathname.startsWith("/disclaimer/") ||
+        pathname === "/privacy" || pathname.startsWith("/privacy/") ||
+        pathname === "/terms" || pathname.startsWith("/terms/");
+      let savedVerified = false;
+      let savedAccepted = false;
+      try {
+        savedVerified = sessionStorage.getItem("na-guest-verified") === "1";
+        savedAccepted = sessionStorage.getItem("na-guest-consent") === "1";
+      } catch {}
+      // 以「本次进入」的会话记录为唯一真源：重新进入（登录页点游客会清掉）⇒ 重新验证
+      setGuestVerified(savedVerified);
+      setGuestAccepted(savedAccepted);
+      // 2026-10-25：游客「退出网站」后再次进站，必须先回登录页重新选择游客身份；
+      // 同一次访问内（点过「以游客身份浏览」/ 刚退出登录）不拦。
+      let guestEntry = false;
+      try {
+        guestEntry =
+          sessionStorage.getItem("na-guest-entry") === "1" ||
+          document.cookie.split(";").some((c) => c.trim() === "na-guest-entry=1");
+      } catch {}
+      if (!onAuthPage && !policyPage && !guestEntry) {
+        setShowTerms(false);
+        setGuestCaptchaOpen(false);
+        setShowUsernameSetup(false);
+        router.replace("/login");
+        return;
+      }
+      setShowTerms(guestGate && savedVerified && !savedAccepted);
+      setGuestCaptchaOpen(guestGate && !savedVerified);
       setShowUsernameSetup(false);
     }
   }, [user, token, termsAccepted, needsUsernameSetup, pathname]);
 
     const handleAcceptTerms = async () => {
       if (!agreedPrivacy || !agreedTerms || !agreedDisclaimer) return;
-      // 游客：没有账号，不调后端 acceptTerms；只记本次访问的同意（退站即清）
+      // 游客：没有账号，不调后端 acceptTerms；只在内存里记本次进入的同意
       if (!user) {
-        try { sessionStorage.setItem("na-guest-consent", "true"); } catch {}
+        setGuestAccepted(true);
+        try { sessionStorage.setItem("na-guest-consent", "1"); } catch {}
         try { localStorage.setItem("neuroaccess-disclaimer-accepted", "true"); } catch {}
         try { window.dispatchEvent(new Event("neuroaccess:disclaimer-accepted")); } catch {}
         setShowTerms(false);
@@ -128,10 +177,28 @@ export default function PostLoginModals() {
     }
   };
 
-  if (!showTerms && !showUsernameSetup) return null;
+  if (!showTerms && !showUsernameSetup && !guestCaptchaOpen) return null;
 
   return (
     <>
+      {/* 2026-10-25：游客进站人机验证（一次会话一次，通过后才进三协议） */}
+      <TurnstileModal
+        siteKey={guestSiteKey}
+        open={guestCaptchaOpen}
+        onVerify={() => {
+          setGuestVerified(true);
+          try { sessionStorage.setItem("na-guest-verified", "1"); } catch {}
+          setGuestCaptchaOpen(false);
+          if (!guestAccepted) setShowTerms(true);
+        }}
+        onClose={() => {
+          // 取消 = 没通过验证 = 不算进入游客模式 ⇒ 清入口标记（含 cookie）并回登录页
+          try { sessionStorage.removeItem("na-guest-entry"); } catch {}
+          try { document.cookie = "na-guest-entry=; path=/; max-age=0; SameSite=Lax"; } catch {}
+          setGuestCaptchaOpen(false);
+          router.replace("/login");
+        }}
+      />
       {/* Terms Modal */}
       {showTerms && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => e.stopPropagation()}>
@@ -160,7 +227,7 @@ export default function PostLoginModals() {
                 <input
                   type="checkbox"
                   checked={agreedPrivacy}
-                  onChange={(e) => setAgreedPrivacy(e.target.checked)}
+                  onChange={(e) => { setAgreedPrivacy(e.target.checked); try { sessionStorage.setItem("na-consent-privacy", e.target.checked ? "1" : "0"); } catch {} }}
                   className="mt-0.5 w-4 h-4 rounded border-[var(--color-border)] text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-400"
                 />
                 <div className="flex-1">
@@ -168,8 +235,6 @@ export default function PostLoginModals() {
                     {t("agreePrivacy")}{" "}
                     <Link
                       href="/privacy"
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-400 hover:underline font-medium"
                     >
                       {t("privacyPolicy")}
@@ -184,7 +249,7 @@ export default function PostLoginModals() {
                 <input
                   type="checkbox"
                   checked={agreedTerms}
-                  onChange={(e) => setAgreedTerms(e.target.checked)}
+                  onChange={(e) => { setAgreedTerms(e.target.checked); try { sessionStorage.setItem("na-consent-terms", e.target.checked ? "1" : "0"); } catch {} }}
                   className="mt-0.5 w-4 h-4 rounded border-[var(--color-border)] text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-400"
                 />
                 <div className="flex-1">
@@ -192,8 +257,6 @@ export default function PostLoginModals() {
                     {t("agreeTerms")}{" "}
                     <Link
                       href="/terms"
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-400 hover:underline font-medium"
                     >
                       {t("termsOfService")}
@@ -208,7 +271,7 @@ export default function PostLoginModals() {
                 <input
                   type="checkbox"
                   checked={agreedDisclaimer}
-                  onChange={(e) => setAgreedDisclaimer(e.target.checked)}
+                  onChange={(e) => { setAgreedDisclaimer(e.target.checked); try { sessionStorage.setItem("na-consent-disclaimer", e.target.checked ? "1" : "0"); } catch {} }}
                   className="mt-0.5 w-4 h-4 rounded border-[var(--color-border)] text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-400"
                 />
                 <div className="flex-1">
@@ -216,8 +279,6 @@ export default function PostLoginModals() {
                     {t("agreeDisclaimer")}{" "}
                     <Link
                       href="/disclaimer"
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-400 hover:underline font-medium"
                     >
                       {t("disclaimer")}

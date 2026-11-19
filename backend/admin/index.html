@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuroAccess Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+        onerror="console.warn('Chart.js CDN failed to load'); window.CHART_FAILED=true"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e1e4eb;min-height:100vh}
+/* ── Login ── */
+#login-page{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#0f1117 0%,#1a1d2e 100%);padding:20px}
+.login-card{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:16px;padding:40px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.login-card h1{font-size:24px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.login-card h1 span{background:#6366f1;width:8px;height:8px;border-radius:50%;display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.login-card p{color:#8892b0;font-size:14px;margin-bottom:24px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;color:#8892b0;margin-bottom:6px;font-weight:500}
+.form-group input{width:100%;padding:10px 14px;border:1px solid #2a2d3e;border-radius:8px;background:#0f1117;color:#e1e4eb;font-size:14px;outline:none;transition:border .2s}
+.form-group input:focus{border-color:#6366f1}
+.btn{width:100%;padding:11px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:#6366f1;color:#fff}
+.btn-primary:hover{background:#5558e6}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.error-msg{color:#f87171;font-size:13px;margin-top:12px;display:none}
+/* ── Captcha ── */
+.captcha-box{display:flex;align-items:center;gap:10px;background:#0f1117;border:1px solid #2a2d3e;border-radius:8px;padding:10px 14px;margin-bottom:8px}
+.captcha-q{font-size:18px;font-weight:700;color:#e1e4eb;letter-spacing:1px;flex:1;text-align:center}
+.captcha-refresh{background:#222538;border:1px solid #2a2d3e;color:#8892b0;border-radius:6px;width:30px;height:30px;cursor:pointer;font-size:15px;flex-shrink:0;transition:all .2s}
+.captcha-refresh:hover{color:#e1e4eb;border-color:#6366f1}
+.captcha-status{font-size:12px;margin-top:6px;min-height:14px}
+.captcha-status.ok{color:#34d399}
+.captcha-status.err{color:#f87171}
+/* ── Layout ── */
+#app{display:none;height:100vh}
+.sidebar{width:220px;background:#1a1d2e;border-right:1px solid #2a2d3e;display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+.sidebar-header{padding:20px;border-bottom:1px solid #2a2d3e}
+.sidebar-header h2{font-size:16px;display:flex;align-items:center;gap:8px}
+.sidebar-header .badge{font-size:10px;background:#6366f1;color:#fff;padding:2px 6px;border-radius:4px;margin-left:4px}
+.sidebar-header p{font-size:11px;color:#8892b0;margin-top:4px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;color:#8892b0;font-size:14px;transition:all .15s;border-left:3px solid transparent}
+.nav-item:hover{background:#222538;color:#e1e4eb}
+.nav-item.active{background:#222538;color:#6366f1;border-left-color:#6366f1;font-weight:500}
+.nav-icon{width:18px;text-align:center;font-size:16px}
+.sidebar-footer{margin-top:auto;padding:16px 20px;border-top:1px solid #2a2d3e;font-size:13px;color:#8892b0}
+.sidebar-footer .logout-btn{cursor:pointer;color:#f87171;margin-top:4px;display:inline-block;font-size:13px}
+.sidebar-footer .logout-btn:hover{text-decoration:underline}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 28px;border-bottom:1px solid #2a2d3e;background:#1a1d2e}
+.topbar h1{font-size:18px}
+.topbar .user-info{font-size:13px;color:#8892b0}
+.content{padding:24px 28px;overflow-y:auto;flex:1}
+/* ── Cards ── */
+.stats-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:24px}
+@media (min-width:1600px){.stats-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media (max-width:760px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat-card{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:12px;padding:16px 18px;transition:border-color .2s;min-height:112px;display:flex;flex-direction:column;justify-content:center}
+.stat-card:hover{border-color:#6366f1}
+.stat-card .stat-value{font-size:32px;font-weight:700;color:#e1e4eb;line-height:1.2}
+.stat-card .stat-label{font-size:13px;color:#8892b0;margin-top:4px}
+.stat-card .stat-icon{font-size:24px;margin-bottom:8px}
+.stat-card.accent-purple .stat-icon{color:#6366f1}
+.stat-card.accent-green .stat-icon{color:#34d399}
+.stat-card.accent-amber .stat-icon{color:#f59e0b}
+.stat-card.accent-cyan .stat-icon{color:#22d3ee}
+.stat-card.accent-red .stat-icon{color:#f87171}
+.stat-card.accent-pink .stat-icon{color:#e879f9}
+/* ── Chart container ── */
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px}
+.chart-card{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:12px;padding:20px}
+.chart-card h3{font-size:14px;color:#8892b0;margin-bottom:12px}
+.chart-card canvas{max-height:220px}
+/* ── Table ── */
+.table-container{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:12px;overflow:hidden}
+.table-toolbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #2a2d3e;flex-wrap:wrap;gap:8px}
+.table-toolbar .search-box{display:flex;gap:8px}
+.table-toolbar input{padding:8px 12px;border:1px solid #2a2d3e;border-radius:6px;background:#0f1117;color:#e1e4eb;font-size:13px;outline:none;width:200px}
+.table-toolbar input:focus{border-color:#6366f1}
+.table-toolbar .total-label{font-size:13px;color:#8892b0}
+table{width:100%;border-collapse:collapse}
+thead th{text-align:left;padding:10px 16px;font-size:12px;color:#8892b0;font-weight:500;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #2a2d3e;background:#141724}
+tbody td{padding:10px 16px;font-size:13px;border-bottom:1px solid #1e2132;color:#c8cdd8}
+tbody tr:hover{background:#222538}
+tbody tr:last-child td{border-bottom:none}
+.status-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.status-tag.yes{background:rgba(52,211,153,.15);color:#34d399}
+.status-tag.no{background:rgba(248,113,113,.15);color:#f87171}
+/* ── Pagination ── */
+.pagination{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-top:1px solid #1e2132}
+.pagination button{background:#0f1117;border:1px solid #2a2d3e;color:#8892b0;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;transition:all .15s}
+.pagination button:hover{background:#222538;color:#e1e4eb;border-color:#6366f1}
+.pagination button:disabled{opacity:.4;cursor:not-allowed}
+.pagination .page-info{font-size:13px;color:#8892b0}
+/* ── Modal ── */
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:16px;width:90%;max-width:520px;max-height:80vh;overflow-y:auto;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal h2{font-size:18px;margin-bottom:16px}
+.modal .close-btn{float:right;background:none;border:none;color:#8892b0;cursor:pointer;font-size:20px}
+.modal .close-btn:hover{color:#e1e4eb}
+.modal field{display:flex;gap:12px;align-items:baseline;margin-bottom:10px;font-size:14px}
+.modal field label{color:#8892b0;flex:0 0 100px}
+.modal field span{flex:1;min-width:0;word-break:break-word;overflow-wrap:anywhere}
+/* ── Feedback / Survey ── */
+.feedback-entry{background:#0f1117;border:1px solid #2a2d3e;border-radius:8px;padding:14px;margin-bottom:10px}
+.feedback-entry .ts{font-size:11px;color:#8892b0;margin-bottom:6px}
+.feedback-entry .text{font-size:13px;line-height:1.6;white-space:pre-wrap}
+.survey-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:24px}
+.survey-stat-box{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:10px;padding:16px}
+.survey-stat-box h3{font-size:13px;color:#8892b0;margin-bottom:10px}
+.survey-stat-box .stat-item{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid #1e2132}
+.survey-stat-box .stat-item:last-child{border-bottom:none}
+.bar-bg{height:6px;background:#1e2132;border-radius:3px;margin-top:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;background:#6366f1;transition:width .4s}
+.other-box{background:#0f1117;border:1px solid #2a2d3e;border-radius:8px;padding:12px;margin-top:6px;font-size:13px;color:#c8cdd8}
+/* ── Responsive ── */
+@media(max-width:768px){
+  .sidebar{width:56px}
+  .sidebar-header h2 span,.sidebar-header p,.nav-item span,.sidebar-footer span{display:none}
+  .sidebar-header .badge{display:none}
+  .nav-item{padding:12px;justify-content:center}
+  .content{padding:16px}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .chart-row{grid-template-columns:1fr}
+  .table-toolbar{flex-direction:column;align-items:stretch}
+  .table-toolbar input{width:100%}
+}
+/* ── Survey per-question ── */
+.question-block{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:12px;padding:20px;margin-bottom:16px}
+.question-block h3{font-size:15px;font-weight:600;margin-bottom:8px}
+.question-block .q-desc{font-size:12px;color:#8892b0;margin-bottom:12px}
+.question-block .answer-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+.answer-tag{display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;background:#0f1117;border:1px solid #2a2d3e}
+.answer-tag .idx{color:#5a5d72;margin-right:4px}
+.answer-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+/* ── Empty state ── */
+.empty-state{text-align:center;padding:40px;color:#8892b0}
+.empty-state .icon{font-size:48px;margin-bottom:12px;opacity:.5}
+.empty-state p{font-size:14px}
+
+/* ── 2026-11-19 后台体验优化 ── */
+.topbar-actions { display:flex; align-items:center; gap:10px; }
+.ghost-btn {
+  background:transparent; border:1px solid #2a2d3e; color:#a8b2d1;
+  padding:6px 12px; border-radius:8px; font-size:12px; cursor:pointer; transition:.18s;
+}
+.ghost-btn:hover { border-color:#6366f1; color:#e1e4eb; background:rgba(99,102,241,.08); }
+.muted { color:#6b7591; font-size:12px; }
+.skel-row { height:14px; border-radius:6px; margin:14px 0; background:linear-gradient(90deg,#1a1d2e 25%,#22263a 37%,#1a1d2e 63%); background-size:400% 100%; animation:skel 1.2s ease-in-out infinite; }
+@keyframes skel { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
+.table-container table thead th { position:sticky; top:0; z-index:2; }
+.fb-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.fb-toolbar input {
+  flex:1; max-width:320px; background:#141727; border:1px solid #2a2d3e; color:#e1e4eb;
+  padding:8px 12px; border-radius:8px; font-size:13px;
+}
+.fb-toolbar input:focus { outline:none; border-color:#6366f1; }
+@media (max-width: 760px) {
+  .topbar { flex-wrap:wrap; gap:8px; }
+  .topbar-actions { width:100%; justify-content:flex-end; }
+}
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-page">
+  <div class="login-card">
+    <h1><span></span> NeuroAccess <span style="font-size:13px;color:#8892b0;font-weight:400">Admin</span></h1>
+    <p id="login-desc">管理后台 — 仅限管理员登录</p>
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="login-user" placeholder="输入管理员用户名" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="login-pass" placeholder="输入密码" autocomplete="current-password">
+    </div>
+    <div class="form-group">
+      <label>人机验证</label>
+      <div id="admin-turnstile-widget" style="margin-top:8px"></div>
+    </div>
+    <button class="btn btn-primary" id="login-btn" onclick="handleLogin()">登录</button>
+    <div class="error-msg" id="login-error"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2><span>⚙️</span> NeuroAccess</h2>
+      <span class="badge">Admin</span>
+      <p style="margin-top:6px">V 2.5</p>
+    </div>
+    <div class="nav-item active" data-view="dashboard" onclick="navigate('dashboard')">
+      <span class="nav-icon">📊</span><span>仪表盘</span>
+    </div>
+    <div class="nav-item" data-view="users" onclick="navigate('users')">
+      <span class="nav-icon">👥</span><span>用户管理</span>
+    </div>
+    <div class="nav-item" data-view="feedback" onclick="navigate('feedback')">
+      <span class="nav-icon">💬</span><span>意见反馈</span>
+    </div>
+    <div class="nav-item" data-view="survey" onclick="navigate('survey')">
+      <span class="nav-icon">📋</span><span>问卷调查</span>
+    </div>
+    <div class="sidebar-footer">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:11px;">Logged in as</div>
+        <span class="lang-toggle" onclick="toggleLang()" style="cursor:pointer;font-size:11px;background:#222538;padding:2px 8px;border-radius:4px;border:1px solid #2a2d3e">EN</span>
+      </div>
+      <div id="admin-username" style="font-weight:500;color:#e1e4eb">admin</div>
+      <div class="logout-btn" onclick="handleLogout()" id="logout-text">退出登录 →</div>
+    </div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <h1 id="page-title">仪表盘</h1>
+      <div class="topbar-actions">
+        <span class="muted" id="last-updated"></span>
+        <button class="ghost-btn" onclick="exportCurrentCsv()">导出 CSV</button>
+        <button class="ghost-btn" onclick="refreshView()">刷新</button>
+      </div>
+    </div>
+    <div class="content" id="page-content">
+      <!-- Dynamic content here -->
+    </div>
+  </div>
+</div>
+
+<!-- User Detail Modal -->
+<div class="modal-overlay" id="user-modal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal('user-modal')">✕</button>
+    <h2 id="modal-title">用户详情</h2>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ── i18n ──
+const _LANG_KEY = 'neuroaccess_admin_lang';
+const _TR = {
+  zh: {
+    pageTitle: 'NeuroAccess Admin',
+    loginDesc: '管理后台 — 仅限管理员登录',
+    surveyOther: '其他',
+    username: '用户名',
+    password: '密码',
+    usernamePH: '输入管理员用户名',
+    passwordPH: '输入密码',
+    loginBtn: '登录',
+    loggingIn: '登录中...',
+    loginErrEmpty: '请输入用户名和密码',
+    loginErrFail: '登录失败',
+    loginErrNetwork: '网络错误，请重试',
+    loginErrCaptcha: '请先完成人机验证',
+    captchaLabel: '人机验证',
+    captchaPH: '输入计算结果',
+    captchaRefresh: '换一题',
+    captchaErr: '答案错误，请重试',
+    captchaExpired: '验证已过期，请重新获取',
+    captchaVerified: '✓ 验证通过',
+    logout: '退出登录 →',
+    loading: '加载中...',
+    loadFailed: '加载失败',
+    loadError: '页面加载异常',
+    noData: '暂无数据',
+    // nav
+    navDashboard: '仪表盘',
+    navUsers: '用户管理',
+    navFeedback: '意见反馈',
+    navSurvey: '问卷调查',
+    // dashboard
+    totalUsers: '总用户数',
+    realUsers: '真实用户',
+    testUsers: '测试账号',
+    totalReports: '分析报告数',
+    surveySubmissions: '问卷提交数',
+    surveyCompletedLabel: '已填问卷 (用户标记)',
+    feedbackLabel: '意见反馈',
+    vcLabel: '验证码记录',
+    userTrend: '用户增长趋势',
+    dataDist: '数据分布',
+    regCount: '注册数',
+    chartUsers: '用户',
+    chartReports: '报告',
+    chartSurvey: '问卷提交',
+    chartFeedback: '反馈',
+    chartFailed: '图表加载失败',
+    // user table
+    thId: 'ID',
+    thUsername: '用户名',
+    thEmail: '邮箱',
+    thDate: '注册日期',
+    thTerms: '协议',
+    thSurvey: '问卷',
+    totalUsers2: '共',
+    totalUsers3: '名用户',
+    page: '第',
+    pageOf: '/',
+    pageTotal: '页',
+    prev: '← 上一页',
+    next: '下一页 →',
+    searchPH: '搜索用户名或邮箱...',
+    searchBtn: '搜索',
+    noUsers: '暂无用户',
+    agreed: '已同意',
+    notAgreed: '未同意',
+    completed: '已填',
+    notCompleted: '未填',
+    testBadge: '测试',
+    // user detail
+    userDetail: '用户详情',
+    loadingDot: '加载中...',
+    fdId: '用户ID',
+    fdName: '用户名',
+    fdEmail: '邮箱',
+    fdRegDate: '注册时间',
+    fdAvatar: '头像颜色',
+    fdTest: '测试账号',
+    fdTestYes: '⚠️ 是',
+    fdTestNo: '否',
+    fdTerms: '已接受协议',
+    fdTermsYes: '✅ 是',
+    fdTermsNo: '❌ 否',
+    fdSurvey: '已填问卷',
+    fdSurveyYes: '✅ 是',
+    fdSurveyNo: '❌ 否',
+    fdReports: '报告数',
+    fdAttempts: '登录尝试',
+    fdLocked: '锁定至',
+    // feedback
+    allFeedback: '全部反馈',
+    items: '条',
+    noFeedback: '暂无反馈',
+    // survey
+    surveyTitle: '问卷调查',
+    noSurvey: '暂无问卷数据',
+    rawData: '原始数据（逐条）',
+    qDetail: '答卷详情',
+    qEmpty: '(空)',
+    // survey q labels
+    q1l: '你是什么人群？',
+    q1d: '医疗从业者 / 学生 / 普通人',
+    q2l: '报告对你有帮助吗？/ 网站好用吗？',
+    q2d: '是 / 否',
+    q3l: '对网站的哪个部分最感兴趣？',
+    q3d: '案例库 / EEG知识 / 分析报告 / EEG模拟器 / 波形图',
+    q4l: '你是从哪里了解到这个网站的？',
+    q4d: '身边人推荐 / 社交平台',
+    q5l: '网站有什么需要改进的地方？',
+    q5d: '自由填写',
+    q6l: '是否愿意继续长期使用网站？',
+    q6d: '愿意 / 不愿意',
+    // 与真实问卷翻译键一致（src/lib/translations.ts 的 surveyQ1..Q6）
+    sq1l: '你是什么人群？',
+    sq1d: '医疗相关从业者 / 学生 / 非医疗相关人员（普通人）/ 其他',
+    sq1Medical: '医疗相关从业者',
+    sq1Student: '学生',
+    sq1Public: '非医疗相关人员（普通人）',
+    sq2l: '你觉得报告对你有帮助吗？/ 网站好用吗？',
+    sq2d: '是 / 否',
+    sq2Yes: '是',
+    sq2No: '否',
+    sq3l: '网站的哪个部分你最感兴趣？',
+    sq3d: '分析报告 / 波形图 / EEG知识 / 案例库 / EEG模拟器 / 其他',
+    sq3Report: '分析报告',
+    sq3Waveform: '波形图',
+    sq3Knowledge: 'EEG知识',
+    sq3Cases: '案例库',
+    sq3Simulator: 'EEG模拟器',
+    sq4l: '你是从哪里了解到这个网站的？',
+    sq4d: '社交平台 / 身边人推荐 / 其他',
+    sq4Referral: '身边人推荐',
+    sq4Social: '社交平台',
+    sq5l: '你觉得网站有什么需要改进的地方？',
+    sq5d: '自由填写',
+    sq6l: '你是否愿意继续长期使用网站？',
+    sq6d: '愿意 / 不愿意',
+    sq6Yes: '愿意',
+    sq6No: '不愿意',
+    q6reason: 'Q6 补充：使用原因',
+    q6reason2: '人填写了原因',
+    people: '人',
+    pct: '%',
+    // answer mapping
+    aMedical: '医疗从业者',
+    aStudent: '学生',
+    aPublic: '普通人',
+    aYes: '是',
+    aNo: '否',
+    aReport: '分析报告',
+    aCases: '案例库',
+    aKnowledge: 'EEG知识',
+    aSimulator: 'EEG模拟器',
+    aWaveform: '波形图',
+    aReferral: '身边人推荐',
+    aSocial: '社交平台',
+    aWilling: '愿意',
+    aUnwilling: '不愿意',
+    aHelpful: '有帮助',
+    aUnhelpful: '没帮助',
+    aShortMedical: '医疗',
+    aShortStudent: '学生',
+    aShortPublic: '普通人',
+    aShortReport: '报告',
+    aShortCases: '案例',
+    aShortKnowledge: '知识',
+    aShortSimulator: '模拟器',
+    aShortWaveform: '波形',
+    aShortReferral: '推荐',
+    aShortSocial: '社交',
+    aShortWilling: '愿意',
+    aShortUnwilling: '不愿意',
+    aScore4: '4分',
+    reason: '原因',
+    // logout expired
+    expired: '登录已过期',
+    reqFailed: '请求失败',
+  },
+  en: {
+    pageTitle: 'NeuroAccess Admin',
+    loginDesc: 'Admin Panel — Admin Only',
+    surveyOther: 'Other',
+    username: 'Username',
+    password: 'Password',
+    usernamePH: 'Enter admin username',
+    passwordPH: 'Enter password',
+    loginBtn: 'Login',
+    loggingIn: 'Logging in...',
+    loginErrEmpty: 'Please enter username and password',
+    loginErrFail: 'Login failed',
+    loginErrNetwork: 'Network error, please retry',
+    loginErrCaptcha: 'Please complete the human verification first',
+    captchaLabel: 'Human Verification',
+    captchaPH: 'Enter the result',
+    captchaRefresh: 'New problem',
+    captchaErr: 'Wrong answer, please retry',
+    captchaExpired: 'Verification expired, please refresh',
+    captchaVerified: '✓ Verified',
+    logout: 'Logout →',
+    loading: 'Loading...',
+    loadFailed: 'Failed to load',
+    loadError: 'Page load error',
+    noData: 'No data',
+    navDashboard: 'Dashboard',
+    navUsers: 'Users',
+    navFeedback: 'Feedback',
+    navSurvey: 'Survey',
+    totalUsers: 'Total Users',
+    realUsers: 'Real Users',
+    testUsers: 'Test Accounts',
+    totalReports: 'Total Reports',
+    surveySubmissions: 'Survey Submissions',
+    surveyCompletedLabel: 'Survey Completed',
+    feedbackLabel: 'Feedback',
+    vcLabel: 'Verification Codes',
+    userTrend: 'User Growth Trend',
+    dataDist: 'Data Distribution',
+    regCount: 'Registrations',
+    chartUsers: 'Users',
+    chartReports: 'Reports',
+    chartSurvey: 'Survey',
+    chartFeedback: 'Feedback',
+    chartFailed: 'Chart failed to load',
+    thId: 'ID',
+    thUsername: 'Username',
+    thEmail: 'Email',
+    thDate: 'Registered',
+    thTerms: 'Terms',
+    thSurvey: 'Survey',
+    totalUsers2: 'Total',
+    totalUsers3: 'users',
+    page: 'Page',
+    pageOf: '/',
+    pageTotal: '',
+    prev: '← Prev',
+    next: 'Next →',
+    searchPH: 'Search username or email...',
+    searchBtn: 'Search',
+    noUsers: 'No users',
+    agreed: 'Agreed',
+    notAgreed: 'Not Agreed',
+    completed: 'Done',
+    notCompleted: 'Pending',
+    testBadge: 'Test',
+    userDetail: 'User Detail',
+    loadingDot: 'Loading...',
+    fdId: 'User ID',
+    fdName: 'Username',
+    fdEmail: 'Email',
+    fdRegDate: 'Registered',
+    fdAvatar: 'Avatar Color',
+    fdTest: 'Test Account',
+    fdTestYes: '⚠️ Yes',
+    fdTestNo: 'No',
+    fdTerms: 'Terms Accepted',
+    fdTermsYes: '✅ Yes',
+    fdTermsNo: '❌ No',
+    fdSurvey: 'Survey Done',
+    fdSurveyYes: '✅ Yes',
+    fdSurveyNo: '❌ No',
+    fdReports: 'Reports',
+    fdAttempts: 'Login Attempts',
+    fdLocked: 'Locked Until',
+    allFeedback: 'All Feedback',
+    items: 'items',
+    noFeedback: 'No feedback yet',
+    surveyTitle: 'Survey Results',
+    noSurvey: 'No survey data',
+    rawData: 'Raw Data',
+    qDetail: 'Responses',
+    qEmpty: '(empty)',
+    q1l: 'Which best describes you?',
+    q1d: 'Medical / Student / Public',
+    q2l: 'Was the report helpful / website easy to use?',
+    q2d: 'Yes / No',
+    q3l: 'Which feature interests you most?',
+    q3d: 'Cases / EEG Knowledge / Report / Simulator / Waveform',
+    q4l: 'How did you hear about us?',
+    q4d: 'Referral / Social Media',
+    q5l: 'What improvements would you suggest?',
+    q5d: 'Free text',
+    q6l: 'Would you continue using the website?',
+    q6d: 'Will / Will not',
+    // Match src/lib/translations.ts surveyQ1..Q6
+    sq1l: 'Which best describes you?',
+    sq1d: 'Medical professional / Student / General public / Other',
+    sq1Medical: 'Medical professional',
+    sq1Student: 'Student',
+    sq1Public: 'General public',
+    sq2l: 'Did you find the reports helpful / the website easy to use?',
+    sq2d: 'Yes / No',
+    sq2Yes: 'Yes',
+    sq2No: 'No',
+    sq3l: 'Which feature interests you most?',
+    sq3d: 'Analysis report / EEG waveform / EEG knowledge / Case studies / EEG simulator / Other',
+    sq3Report: 'Analysis report',
+    sq3Waveform: 'EEG waveform',
+    sq3Knowledge: 'EEG knowledge',
+    sq3Cases: 'Case studies',
+    sq3Simulator: 'EEG simulator',
+    sq4l: 'How did you hear about this website?',
+    sq4d: 'Social media / Referral / Other',
+    sq4Referral: 'Referral',
+    sq4Social: 'Social media',
+    sq5l: 'What improvements would you suggest?',
+    sq5d: 'Free text',
+    sq6l: 'Would you continue using the website long-term?',
+    sq6d: 'Will / Will not',
+    sq6Yes: 'Will',
+    sq6No: 'Will not',
+    q6reason: 'Q6 Reason',
+    q6reason2: 'people filled reasons',
+    people: 'people',
+    pct: '%',
+    aMedical: 'Medical',
+    aStudent: 'Student',
+    aPublic: 'Public',
+    aYes: 'Yes',
+    aNo: 'No',
+    aReport: 'Report',
+    aCases: 'Cases',
+    aKnowledge: 'Knowledge',
+    aSimulator: 'Simulator',
+    aWaveform: 'Waveform',
+    aReferral: 'Referral',
+    aSocial: 'Social Media',
+    aWilling: 'Will',
+    aUnwilling: 'Will not',
+    aHelpful: 'Helpful',
+    aUnhelpful: 'Unhelpful',
+    aShortMedical: 'Medical',
+    aShortStudent: 'Student',
+    aShortPublic: 'Public',
+    aShortReport: 'Report',
+    aShortCases: 'Cases',
+    aShortKnowledge: 'Knowledge',
+    aShortSimulator: 'Simulator',
+    aShortWaveform: 'Waveform',
+    aShortReferral: 'Referral',
+    aShortSocial: 'Social',
+    aShortWilling: 'Will',
+    aShortUnwilling: 'Not',
+    aScore4: '4pt',
+    reason: 'Reason',
+    expired: 'Session expired',
+    reqFailed: 'Request failed',
+  },
+};
+
+function T(k) {
+  let lang = localStorage.getItem(_LANG_KEY) || 'zh';
+  return (_TR[lang] && _TR[lang][k]) || _TR.zh[k] || k;
+}
+
+function toggleLang() {
+  let current = localStorage.getItem(_LANG_KEY) || 'zh';
+  let next = current === 'zh' ? 'en' : 'zh';
+  localStorage.setItem(_LANG_KEY, next);
+  // Update static HTML (sidebar, login page, topbar)
+  applyLang();
+  // Re-render current view for dynamic content
+  const active = document.querySelector('.nav-item.active');
+  if (active) {
+    const view = active.getAttribute('data-view') || 'dashboard';
+    navigate(view);
+  }
+}
+
+// ── State ──
+let TOKEN = sessionStorage.getItem('neuroaccess_admin_token') || '';
+let ADMIN_USER = sessionStorage.getItem('neuroaccess_admin_user') || '';
+let CAPTCHA_TOKEN = ''; // replaced by Turnstile token
+let turnstileToken = '';
+
+// ── Apply lang to static HTML ──
+function applyLang() {
+  document.title = T('pageTitle');
+  document.querySelector('#login-page p').textContent = T('loginDesc');
+  document.querySelectorAll('.form-group label')[0].textContent = T('username');
+  document.querySelectorAll('.form-group label')[1].textContent = T('password');
+  document.querySelector('#login-user').placeholder = T('usernamePH');
+  document.querySelector('#login-pass').placeholder = T('passwordPH');
+  document.querySelector('#login-btn').textContent = T('loginBtn');
+  document.querySelector('#logout-text').textContent = T('logout');
+  // Nav items in order (text span is the 2nd child of each nav-item)
+  const navItems = document.querySelectorAll('.nav-item');
+  const navKeys = ['navDashboard','navUsers','navFeedback','navSurvey'];
+  navItems.forEach((item, i) => {
+    const spans = item.querySelectorAll('span');
+    // Last span is the text (after nav-icon)
+    if (spans.length > 1) {
+      spans[spans.length - 1].textContent = T(navKeys[i]);
+    }
+  });
+  // Lang toggle display
+  const currentLang = localStorage.getItem(_LANG_KEY) || 'zh';
+  document.querySelector('.lang-toggle').textContent = currentLang === 'zh' ? 'EN' : '中';
+}
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', () => {
+  applyLang();
+  if (TOKEN && ADMIN_USER) {
+    document.getElementById('admin-username').textContent = ADMIN_USER;
+    showApp();
+    navigate('dashboard');
+  }
+  // Enter to login
+  document.getElementById('login-pass').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleLogin();
+  });
+  document.getElementById('login-user').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('login-pass').focus();
+  });
+});
+
+// ── Auth ──
+function showApp() {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+}
+
+function showLogin() {
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-page').style.display = 'flex';
+  turnstileToken = '';
+  // Reset Turnstile widget
+  if (window.turnstile) {
+    try { window.turnstile.reset('#admin-turnstile-widget'); } catch(e) {}
+  }
+}
+
+async function handleLogin() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-error');
+  err.style.display = 'none';
+
+  if (!username || !password) {
+    err.textContent = T('loginErrEmpty');
+    err.style.display = 'block';
+    return;
+  }
+
+  if (!turnstileToken) {
+    err.textContent = T('loginErrCaptcha');
+    err.style.display = 'block';
+    return;
+  }
+
+  btn.textContent = T('loggingIn');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password, cf_turnstile_response: turnstileToken}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const detail = data.detail || T('loginErrFail');
+      err.textContent = detail;
+      err.style.display = 'block';
+      turnstileToken = '';
+      if (window.turnstile) { try { window.turnstile.reset('#admin-turnstile-widget'); } catch(e) {} }
+      btn.textContent = T('loginBtn');
+      btn.disabled = false;
+      return;
+    }
+    TOKEN = data.token;
+    ADMIN_USER = data.username;
+    sessionStorage.setItem('neuroaccess_admin_token', TOKEN);
+    sessionStorage.setItem('neuroaccess_admin_user', ADMIN_USER);
+    document.getElementById('admin-username').textContent = ADMIN_USER;
+    showApp();
+    navigate('dashboard');
+  } catch(e) {
+    err.textContent = T('loginErrNetwork');
+    err.style.display = 'block';
+  } finally {
+    btn.textContent = T('loginBtn');
+    btn.disabled = false;
+  }
+}
+
+function handleLogout() {
+  TOKEN = '';
+  ADMIN_USER = '';
+  sessionStorage.removeItem('neuroaccess_admin_token');
+  sessionStorage.removeItem('neuroaccess_admin_user');
+  showLogin();
+}
+
+// ── API Helper ──
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      ...(opts.headers || {}),
+      'Authorization': `Bearer ${TOKEN}`,
+    },
+  });
+  if (res.status === 401) {
+    handleLogout();
+    throw new Error(T('expired'));
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || T('reqFailed'));
+  return data;
+}
+
+// ── Navigation ──
+function navigate(view) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const target = document.querySelector(`.nav-item[data-view="${view}"]`);
+  if (target) target.classList.add('active');
+  const titles = {dashboard:T('navDashboard'),users:T('navUsers'),feedback:T('navFeedback'),survey:T('navSurvey')};
+  document.getElementById('page-title').textContent = titles[view] || T('navDashboard');
+  const renderers = {dashboard:renderDashboard,users:renderUsers,feedback:renderFeedback,survey:renderSurvey};
+  if (renderers[view]) {
+    try { renderers[view](); } catch(e) {
+      document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${T('loadError')}: ${e.message}</p></div>`;
+    }
+  }
+}
+
+// ── Dashboard ──
+async function renderDashboard() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:#8892b0">'+T('loading')+'</div>';
+  try {
+    const data = await api('/api/admin/dashboard');
+    stampUpdated();
+    el.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card accent-purple">
+          <div class="stat-icon">👥</div>
+          <div class="stat-value">${data.totalUsers}</div>
+          <div class="stat-label">${T('totalUsers')}</div>
+          <div style="font-size:11px;color:#5a5d72;margin-top:2px">${T('realUsers')}: ${data.realUsers} &middot; ${T('testUsers')}: ${data.testUsers}</div>
+        </div>
+        <div class="stat-card accent-green">
+          <div class="stat-icon">📝</div>
+          <div class="stat-value">${data.totalReports}</div>
+          <div class="stat-label">${T('totalReports')}</div>
+        </div>
+        <div class="stat-card accent-amber">
+          <div class="stat-icon">📋</div>
+          <div class="stat-value">${data.surveySubmissions}</div>
+          <div class="stat-label">${T('surveySubmissions')}</div>
+        </div>
+        <div class="stat-card accent-cyan">
+          <div class="stat-icon">✅</div>
+          <div class="stat-value">${data.surveyCompleted}</div>
+          <div class="stat-label">${T('surveyCompletedLabel')}</div>
+        </div>
+        <div class="stat-card accent-red">
+          <div class="stat-icon">💬</div>
+          <div class="stat-value">${data.feedbackCount}</div>
+          <div class="stat-label">${T('feedbackLabel')}</div>
+        </div>
+        <div class="stat-card accent-pink">
+          <div class="stat-icon">🔑</div>
+          <div class="stat-value">${data.verificationCodes}</div>
+          <div class="stat-label">${T('vcLabel')}</div>
+        </div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <h3>📊 ${T('userTrend')} <span style="font-size:11px;color:#5a5d72;font-weight:400">最近 30 天</span></h3>
+          <canvas id="userChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>📈 ${T('dataDist')}</h3>
+          <canvas id="distChart"></canvas>
+        </div>
+      </div>
+    `;
+    // User chart - last 7 days registration
+    drawUserChart();
+    // Distribution chart
+    drawDistChart(data);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${T('loadFailed')}: ${e.message}</p></div>`;
+  }
+}
+
+async function drawUserChart() {
+  if (window.CHART_FAILED || typeof Chart === 'undefined') {
+    document.getElementById('userChart')?.parentElement?.replaceChildren?.();
+    return;
+  }
+  const canvas = document.getElementById('userChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  try {
+    // 拉取所有用户（含测试账号）
+    const allUsers = [];
+    for (let p = 1; p <= 10; p++) {
+      const r = await api(`/api/admin/users?page=${p}&limit=100&filter=all`);
+      const us = r.users || [];
+      allUsers.push(...us);
+      if (us.length < 100) break;
+    }
+    // 按 day bucket
+    const days = {};
+    allUsers.forEach(u => {
+      const d = u.created_at ? u.created_at.slice(0,10) : '';
+      if (d) days[d] = (days[d] || 0) + 1;
+    });
+    // 补全从最早到今天
+    const dates = Object.keys(days).sort();
+    if (!dates.length) {
+      // 无数据时不画
+      return;
+    }
+    // 2026-11-19：最多画最近 30 天，避免全量日期把 x 轴挤成一团
+    const end = new Date();
+    const rawStart = new Date(dates[0]);
+    const minStart = new Date(end.getTime() - 29 * 86400000);
+    const start = rawStart > minStart ? rawStart : minStart;
+    const labels = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = d.toISOString().slice(0,10);
+      labels.push(key);
+      if (days[key] === undefined) days[key] = 0;
+    }
+    const sortedLabels = labels.sort();
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: sortedLabels.map(k => k.slice(5)),
+        datasets: [{
+          data: sortedLabels.map(k => days[k]),
+          borderColor: '#6366f1',
+          backgroundColor: 'rgba(99,102,241,0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 4,
+          pointBackgroundColor: '#6366f1',
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {ticks:{color:'#5a5d72',maxTicksLimit:8,maxRotation:0,autoSkip:true},grid:{color:'#1e2132'}},
+          y: {beginAtZero:true,ticks:{color:'#5a5d72',stepSize:1,precision:0},grid:{color:'#1e2132'}},
+        },
+      },
+    });
+  } catch(e) {
+    const parent = canvas.parentElement;
+    if (parent) parent.innerHTML = '<p style="color:#8892b0">'+T('chartFailed')+'</p>';
+  }
+}
+
+function drawDistChart(data) {
+  if (window.CHART_FAILED || typeof Chart === 'undefined') return;
+  const canvas = document.getElementById('distChart');
+  if (!canvas) return;
+  try {
+    new Chart(canvas.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: [T('chartUsers'), T('chartReports'), T('chartSurvey'), T('chartFeedback')],
+        datasets: [{
+          data: [
+            data.totalUsers || 0,
+            data.totalReports || 0,
+            data.surveySubmissions || 0,
+            data.feedbackCount || 0,
+          ],
+          backgroundColor: ['#6366f1','#34d399','#f59e0b','#f87171'],
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {color:'#8892b0',padding:12,font:{size:12}},
+          },
+        },
+      },
+    });
+  } catch(e) {
+    /* chart failed silently */
+  }
+}
+
+// ── Users ──
+let userPage = 1;
+let userSearch = '';
+
+async function renderUsers() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = skeletonHtml(6);
+  try {
+    const data = await api(`/api/admin/users?page=${userPage}&limit=20&search=${encodeURIComponent(userSearch)}&filter=all`);
+    LAST.users = data.users || []; LAST.usersTotal = data.total || 0; stampUpdated();
+    let rows = '';
+    (data.users || []).forEach(u => {
+      const terms = u.terms_accepted ? '<span class="status-tag yes">'+T('agreed')+'</span>' : '<span class="status-tag no">'+T('notAgreed')+'</span>';
+      const survey = u.survey_completed ? '<span class="status-tag yes">'+T('completed')+'</span>' : '<span class="status-tag no">'+T('notCompleted')+'</span>';
+      const testBadge = u.is_test ? '<span class="status-tag" style="background:rgba(245,158,11,.15);color:#f59e0b">'+T('testBadge')+'</span>' : '';
+      const date = u.created_at ? u.created_at.slice(0,10) : '-';
+      rows += `<tr onclick="showUserDetail(${u.id})" style="cursor:pointer">
+        <td>${u.id}</td>
+        <td><strong>${escapeHtml(u.username)}</strong> ${testBadge}</td>
+        <td style="color:#8892b0">${escapeHtml(u.email)}</td>
+        <td>${date}</td>
+        <td>${terms}</td>
+        <td>${survey}</td>
+      </tr>`;
+    });
+    const totalPages = Math.max(1, Math.ceil(data.total / 20));
+    el.innerHTML = `
+      <div class="table-container">
+        <div class="table-toolbar">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span class="total-label">${T('totalUsers2')} <strong>${data.total}</strong> ${T('totalUsers3')}</span>
+          </div>
+          <div class="search-box">
+            <input type="text" id="user-search" placeholder="${T('searchPH')}" value="${escapeHtml(userSearch)}"
+                   onkeydown="if(event.key==='Enter'){userSearch=this.value;userPage=1;renderUsers()}">
+            <button class="btn" style="width:auto;padding:8px 16px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px" onclick="userSearch=document.getElementById('user-search').value;userPage=1;renderUsers()">${T('searchBtn')}</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>${T('thId')}</th><th>${T('thUsername')}</th><th>${T('thEmail')}</th><th>${T('thDate')}</th><th>${T('thTerms')}</th><th>${T('thSurvey')}</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:30px;color:#8892b0">'+T('noUsers')+'</td></tr>'}</tbody>
+        </table>
+        <div class="pagination">
+          <button onclick="userPage--;renderUsers()" ${userPage<=1?'disabled':''}>${T('prev')}</button>
+          <span class="page-info">${T('page')} ${userPage} ${T('pageOf')} ${totalPages} ${T('pageTotal')}</span>
+          <button onclick="userPage++;renderUsers()" ${userPage>=totalPages?'disabled':''}>${T('next')}</button>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${T('loadFailed')}: ${e.message}</p></div>`;
+  }
+}
+
+async function showUserDetail(id) {
+  document.getElementById('modal-title').textContent = `${T('userDetail')} #${id}`;
+  document.getElementById('modal-body').innerHTML = '<p style="color:#8892b0">'+T('loadingDot')+'</p>';
+  openModal('user-modal');
+  try {
+    const u = await api(`/api/admin/users/${id}`);
+    const fields = [
+      [T('fdId'), u.id],
+      [T('fdName'), u.username || '-'],
+      [T('fdEmail'), u.email || '-'],
+      [T('fdRegDate'), u.created_at || '-'],
+      [T('fdAvatar'), u.avatar_color || '-'],
+      [T('fdTest'), u.is_test ? T('fdTestYes') : T('fdTestNo')],
+      [T('fdTerms'), u.terms_accepted ? T('fdTermsYes') : T('fdTermsNo')],
+      [T('fdSurvey'), u.survey_completed ? T('fdSurveyYes') : T('fdSurveyNo')],
+      [T('fdReports'), u.report_count || 0],
+      [T('fdAttempts'), u.login_attempts || 0],
+      [T('fdLocked'), u.locked_until || '-'],
+    ];
+    document.getElementById('modal-body').innerHTML = fields.map(([k,v]) =>
+      `<field><label>${k}</label><span>${v}</span></field>`
+    ).join('');
+  } catch(e) {
+    document.getElementById('modal-body').innerHTML = `<p style="color:#f87171">${T('loadFailed')}: ${e.message}</p>`;
+  }
+}
+
+// ── Feedback ──
+async function renderFeedback() {
+  const el = document.getElementById('page-content');
+  el.innerHTML = skeletonHtml(5);
+  try {
+    const data = await api('/api/admin/feedback');
+    LAST.feedback = data.entries || [];
+    LAST.feedbackTotal = data.total || LAST.feedback.length;
+    stampUpdated();
+    renderFeedbackFromCache();
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${T('loadFailed')}: ${e.message}</p></div>`;
+  }
+}
+
+function renderFeedbackFromCache() {
+  const el = document.getElementById('page-content');
+  const entries = LAST.feedback || [];
+  {
+    const data = { entries, total: LAST.feedbackTotal || entries.length };
+    if (!data.entries || data.entries.length === 0) {
+      el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>暂无反馈</p></div>`;
+      return;
+    }
+    const q = fbQuery;
+    const shown = q
+      ? data.entries.filter(e => `${e.content || e.message || ''} ${e.name || ''} ${e.email || ''} ${e.type || ''}`.toLowerCase().includes(q))
+      : data.entries;
+    const items = shown.map(e => {
+      const ts = e.timestamp || '';
+      const body = e.content || e.message || '';
+      const meta = [];
+      if (e.source !== 'log') {
+        if (e.type) meta.push(`类型: ${e.type}`);
+        if (e.name) meta.push(`名字: ${e.name}`);
+        if (e.email) meta.push(`邮箱: ${e.email}`);
+        if (e.rating) meta.push(`评分: ${e.rating}`);
+        if (e.user_id) meta.push(`用户ID: ${e.user_id}`);
+      }
+      const metaHtml = meta.length ? `<div class="text" style="color:#8892b0;font-size:12px;margin-bottom:4px">${meta.map(m => escapeHtml(m)).join(' · ')}</div>` : '';
+      return `<div class="feedback-entry">
+        <div class="ts">📅 ${escapeHtml(ts)}${e.source === 'log' ? ' <span style="opacity:.5">(旧日志)</span>' : ''}</div>
+        ${metaHtml}
+        <div class="text">${escapeHtml(body)}</div>
+      </div>`;
+    }).join('');
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">${T('allFeedback')} <span style="color:#8892b0;font-weight:400">(${shown.length}/${data.total} ${T('items')})</span></h2>
+        <div class="fb-toolbar" style="margin:0">
+          <input id="fb-search" type="text" placeholder="搜索内容 / 姓名 / 邮箱" value="${escapeHtml(fbQuery)}"
+                 oninput="fbQuery=this.value.trim().toLowerCase();renderFeedbackFromCache()">
+        </div>
+      </div>
+      ${items || '<div class="empty-state"><div class="icon">🔍</div><p>没有匹配的反馈</p></div>'}
+    `;
+  }
+}
+
+// ── Survey ──
+const SURVEY_QS = ['q1','q2','q3','q4','q5','q6'];
+
+// 从 admin 内部多语言表里读"问卷题目"和"选项提示"。
+// 因为 translations.ts 是 Next.js 前端用的，admin SPA 是独立服务不能直接 import；
+// 但 admin 自己的 _TR.zh/_TR.en 表里也维护了对应的中英字段，保持两边文案一致。
+// 真实问卷的题目与选项来自 src/lib/translations.ts 的 surveyQ1..surveyQ6。
+const SURVEY_Q = {
+  q1: { lKey: 'sq1l', dKey: 'sq1d' },
+  q2: { lKey: 'sq2l', dKey: 'sq2d' },
+  q3: { lKey: 'sq3l', dKey: 'sq3d' },
+  q4: { lKey: 'sq4l', dKey: 'sq4d' },
+  q5: { lKey: 'sq5l', dKey: 'sq5d' },
+  q6: { lKey: 'sq6l', dKey: 'sq6d' },
+};
+
+// 通用答卷值映射：与主站 SurveyPanel 真实问卷选项文案保持一字不差
+// 返回 null 表示该值不合法（聚合/明细都要过滤）
+function mapAnswerValue(qi, val) {
+  if (val === undefined || val === null || val === '') return null;
+  if (qi === 'q1') {
+    if (val === 'medical') return T('sq1Medical');
+    if (val === 'student') return T('sq1Student');
+    if (val === 'public') return T('sq1Public');
+    if (val === 'other') return T('surveyOther');
+    return null;
+  }
+  if (qi === 'q2') {
+    if (val === 'yes') return T('sq2Yes');
+    if (val === 'no') return T('sq2No');
+    return null;
+  }
+  if (qi === 'q3') {
+    if (val === 'report') return T('sq3Report');
+    if (val === 'cases') return T('sq3Cases');
+    if (val === 'knowledge') return T('sq3Knowledge');
+    if (val === 'simulator') return T('sq3Simulator');
+    if (val === 'waveform') return T('sq3Waveform');
+    if (val === 'other') return T('surveyOther');
+    return null;
+  }
+  if (qi === 'q4') {
+    if (val === 'referral') return T('sq4Referral');
+    if (val === 'social') return T('sq4Social');
+    if (val === 'other') return T('surveyOther');
+    return null;
+  }
+  if (qi === 'q5') {
+    return String(val).slice(0, 200);
+  }
+  if (qi === 'q6') {
+    if (val === 'yes') return T('sq6Yes');
+    if (val === 'no') return T('sq6No');
+    return null;
+  }
+  return null;
+}
+
+async function renderSurvey() {
+  setTimeout(stampUpdated, 0);
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:#8892b0">加载中...</div>';
+  try {
+    const data = await api('/api/admin/survey');
+    LAST.survey = data.entries || []; LAST.surveyTotal = data.total || LAST.survey.length;
+    if (!data.entries || data.entries.length === 0) {
+      el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>暂无问卷数据</p></div>`;
+      return;
+    }
+    const entries = data.entries;
+    const stats = data.stats || {};
+    const total = data.total;
+
+    // Build question blocks for q1-q6
+    const QICONS = {q1:'👤',q2:'👍',q3:'🎯',q4:'🔗',q5:'💡',q6:'✅'};
+    // 每个题目的标准选项（按主站 SurveyPanel 实际顺序），用于显示全部分类
+    const STD_OPTIONS = {
+      q1: ['medical', 'student', 'public', 'other'],
+      q2: ['yes', 'no'],
+      q3: ['report', 'waveform', 'knowledge', 'cases', 'simulator', 'other'],
+      q4: ['social', 'referral', 'other'],
+      q6: ['yes', 'no'],
+    };
+    let blocksHtml = '';
+    SURVEY_QS.forEach(qi => {
+      const vals = stats[qi] || {};
+      // 1. 列出所有标准选项（即使 0 人也显示），然后追加任何额外/老数据
+      const stdOpts = STD_OPTIONS[qi] || [];
+      const extra = Object.keys(vals).filter(k => !stdOpts.includes(k) && mapAnswerValue(qi, k));
+      const allValidKeys = [...stdOpts, ...extra];
+      // 2. 计算合法总数
+      const validTotal = allValidKeys.reduce((sum, k) => sum + (vals[k] || 0), 0);
+
+      // Aggregate bar
+      let barsHtml = '';
+      if (qi === 'q5') {
+        // 自由文本——直接列出每条回答原文，每行一条
+        const texts = entries
+          .map(e => mapAnswerValue('q5', e.q5))
+          .filter(v => v && v.trim());
+        if (texts.length) {
+          barsHtml = texts.map(t =>
+            `<div class="other-box" style="margin-bottom:6px">${escapeHtml(t)}</div>`
+          ).join('');
+        } else {
+          barsHtml = '<p style="color:#8892b0;font-size:13px">'+T('noData')+'</p>';
+        }
+      } else if (validTotal > 0) {
+        allValidKeys.forEach(v => {
+          const label = mapAnswerValue(qi, v);
+          if (!label) return;
+          const cnt = vals[v] || 0;
+          const pct = Math.round(cnt / validTotal * 100);
+          barsHtml += `<div class="stat-item"><span>${escapeHtml(label)}</span><span>${cnt} ${T('people')} (${pct}${T('pct')})</span></div>
+            <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>`;
+        });
+      } else {
+        barsHtml = '<p style="color:#8892b0;font-size:13px">'+T('noData')+'</p>';
+      }
+
+      // Per-entry answers — 自由文本题不显示在明细里（已在上方列表展示）
+      const ansTags = qi === 'q5' ? [] : entries.map((e, i) => {
+        const val = mapAnswerValue(qi, e[qi]);
+        if (val === null) return null;
+        return `<span class="answer-tag"><span class="idx">#${entries.indexOf(e)+1}</span>${escapeHtml(String(val))}</span>`;
+      }).filter(Boolean);
+      const detailHtml = ansTags.length
+        ? `<div style="font-size:12px;color:#5a5d72;margin-bottom:4px">📋 ${T('qDetail')} (${ansTags.length}/${entries.length})</div>
+           <div class="answer-row">${ansTags.join('')}</div>`
+        : '';
+
+      blocksHtml += `<div class="question-block">
+        <h3>${QICONS[qi]} ${T(SURVEY_Q[qi].lKey)}</h3>
+        <div class="q-desc">${T(SURVEY_Q[qi].dKey)}</div>
+        <div class="survey-stat-box" style="margin-bottom:10px">
+          ${barsHtml}
+        </div>
+        ${detailHtml}
+      </div>`;
+    });
+
+    // q6_reason (if any)
+    const reasonEntries = entries.filter(e => e.q6_reason);
+    let reasonBlock = '';
+    if (reasonEntries.length) {
+      const reasonHtml = reasonEntries.map((e,i) =>
+        `<div class="other-box" style="margin-bottom:6px"><span style="color:#5a5d72">#${entries.indexOf(e)+1}</span> ${escapeHtml(e.q6_reason)}</div>`
+      ).join('');
+      reasonBlock = `<div class="question-block">
+        <h3>📝 Q6 补充：你不愿意继续使用的原因</h3>
+        <div class="q-desc">${reasonEntries.length} ${T('q6reason2')}</div>
+        ${reasonHtml}
+      </div>`;
+    }
+
+    // Raw data at bottom — 复用通用 mapAnswerValue 翻译原始值
+    const rawHtml = entries.map((e,i) => {
+      const items = SURVEY_QS.map(q => {
+        const v = e[q];
+        const shown = (v === undefined || v === null || v === '') ? '-' : (mapAnswerValue(q, v) || String(v));
+        return `<strong>${q.toUpperCase()}:</strong> ${escapeHtml(shown)}`;
+      }).join(' | ');
+      const reason = e.q6_reason ? escapeHtml(e.q6_reason) : '';
+      return `<div class="feedback-entry">
+        <div style="font-size:11px;color:#8892b0;margin-bottom:4px">#${i+1}</div>
+        <div class="text">${items}${reason ? '<br><strong>'+T('reason')+':</strong> '+reason : ''}</div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="font-size:16px;font-weight:600">${T('surveyTitle')} <span style="color:#8892b0;font-weight:400">(${total} ${T('items')})</span></h2>
+      </div>
+      ${blocksHtml}
+      ${reasonBlock}
+      <div style="margin-top:20px">
+        <h2 style="font-size:15px;font-weight:600;margin-bottom:12px">📄 ${T('rawData')}</h2>
+        ${rawHtml}
+      </div>
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${T('loadFailed')}: ${e.message}</p></div>`;
+  }
+}
+
+// ── Modal ──
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.getElementById('user-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal('user-modal');
+});
+
+// ── Utils ──
+// ── 2026-11-19 体验优化：骨架屏 / 刷新 / CSV 导出 ──
+const LAST = { view: 'dashboard', users: [], usersTotal: 0, feedback: [], survey: [] };
+let fbQuery = '';
+
+function skeletonHtml(rows) {
+  rows = rows || 6;
+  let out = '<div style="padding:8px 4px">';
+  for (let i = 0; i < rows; i++) {
+    out += `<div class="skel-row" style="width:${60 + ((i * 13) % 35)}%"></div>`;
+  }
+  return out + '</div>';
+}
+
+function stampUpdated() {
+  try {
+    const el = document.getElementById('last-updated');
+    if (el) el.textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  } catch (e) {}
+}
+
+function currentView() {
+  const active = document.querySelector('.nav-item.active');
+  return (active && active.getAttribute('data-view')) || 'dashboard';
+}
+
+function refreshView() {
+  const v = currentView();
+  const map = { dashboard: renderDashboard, users: renderUsers, feedback: renderFeedback, survey: renderSurvey };
+  if (map[v]) map[v]();
+}
+
+function toCsvCell(v) {
+  const s = v === null || v === undefined ? '' : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(filename, headers, rows) {
+  const lines = [headers.map(toCsvCell).join(',')];
+  rows.forEach(r => lines.push(r.map(toCsvCell).join(',')));
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 800);
+}
+
+function exportCurrentCsv() {
+  const v = currentView();
+  const day = new Date().toISOString().slice(0, 10);
+  if (v === 'users' && LAST.users.length) {
+    downloadCsv(`users_${day}.csv`, ['ID', '用户名', '邮箱', '注册日期', '协议', '问卷', '测试账号'],
+      LAST.users.map(u => [u.id, u.username, u.email, (u.created_at || '').slice(0, 10),
+        u.terms_accepted ? '已同意' : '未同意', u.survey_completed ? '已完成' : '未完成', u.is_test ? '是' : '否']));
+    return;
+  }
+  if (v === 'feedback' && LAST.feedback.length) {
+    downloadCsv(`feedback_${day}.csv`, ['时间', '类型', '姓名', '邮箱', '评分', '用户ID', '内容'],
+      LAST.feedback.map(e => [e.timestamp || '', e.type || '', e.name || '', e.email || '', e.rating || '', e.user_id || '', e.content || e.message || '']));
+    return;
+  }
+  if (v === 'survey' && LAST.survey.length) {
+    const rows = LAST.survey.map(e => {
+      const base = [e.timestamp || e.created_at || '', e.user_id || ''];
+      const answers = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].map(k => {
+        const v2 = e[k];
+        if (Array.isArray(v2)) return v2.join(' / ');
+        if (v2 && typeof v2 === 'object') return JSON.stringify(v2);
+        return v2 === undefined || v2 === null ? '' : v2;
+      });
+      return base.concat(answers);
+    });
+    downloadCsv(`survey_${day}.csv`, ['时间', '用户ID', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6'], rows);
+    return;
+  }
+  alert('当前页面暂无可导出的数据');
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+<script>
+// Add Turnstile widget after all other scripts
+(function(){var s=document.createElement('script');s.src='https://challenges.cloudflare.com/turnstile/v0/api.js';s.onload=function(){window.turnstile.render('#admin-turnstile-widget',{sitekey:'0x4AAAAAAD1sCtXfpVjLaLsg',callback:function(t){turnstileToken=t},'expired-callback':function(){turnstileToken=''},theme:'dark'})};document.head.appendChild(s)})();
+</script>
+</body>
+</html>
